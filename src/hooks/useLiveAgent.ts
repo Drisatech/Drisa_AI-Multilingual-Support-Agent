@@ -71,6 +71,9 @@ export function useLiveAgent() {
         setIsConnected(true);
         setIsConnecting(false);
         
+        // Trigger connection on backend
+        ws.send(JSON.stringify({ event: 'start' }));
+        
         // Setup microphone
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         mediaStreamRef.current = stream;
