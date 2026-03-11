@@ -108,9 +108,9 @@ export function useLiveAgent() {
         const data = JSON.parse(event.data);
         if (data.event === 'audio' && streamerRef.current) {
           streamerRef.current.addPCM16(data.audio);
+        } else if (data.event === 'transcript') {
+          setTranscript(prev => [...prev, { role: data.role, text: data.text }]);
         }
-        // Note: Transcriptions and tool call feedback would need to be passed back through the proxy
-        // For now, we focus on getting the audio working.
       };
 
       ws.onerror = (err) => {
