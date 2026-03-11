@@ -23,6 +23,29 @@ A professional multilingual AI Voice Support Agent built with React, Express, an
 
 ---
 
+# Live Demo
+
+To test the live demonstration of the **Drisa_AI Agent**
+
+The agent allows users to:
+
+- Speak directly with the AI voice assistant as a phone call conversation
+- Request product or service information
+- Receive automated follow-up recommendations
+- Experience real-time multilingual AI interaction
+
+### Demo Capabilities
+
+- Voice conversation with the AI agent
+- Product catalog search through voice
+- WhatsApp and email follow-up message simulation
+- AI-driven sales recommendation
+
+Here is the demo link for accessibility:
+https://drisa-ai-agent-448742322230.us-central1.run.app
+
+---
+
 # 👨‍💻 About Me
 
 ## 🧠 Aliyu Idris Adeiza — Data Engineer | Data Scientist | Cloud & AI Systems Developer
