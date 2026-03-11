@@ -76,7 +76,6 @@ export default function App() {
           <div className="max-w-3xl mx-auto">
             <div className="mb-8">
               <h2 className={`text-3xl font-semibold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>Live Voice Agent</h2>
-              <p className={`${darkMode ? 'text-white/60' : 'text-zinc-500'} mt-2`}>Test your multilingual AI Support Agent directly in the browser.</p>
             </div>
 
             <div className={`rounded-3xl shadow-sm border p-8 md:p-12 flex flex-col items-center justify-center min-h-[400px] transition-colors duration-300 ${darkMode ? 'bg-brand-secondary border-white/10' : 'bg-white border-zinc-200'}`}>
@@ -176,18 +175,6 @@ export default function App() {
               </div>
             )}
 
-            <div className={`mt-8 rounded-2xl p-6 transition-colors duration-300 ${darkMode ? 'bg-brand-primary/20 border border-white/10 text-white/80' : 'bg-brand-primary text-white/80'}`}>
-              <h4 className="font-medium text-white mb-4 flex items-center gap-2">
-                <Settings className={`w-5 h-5 ${darkMode ? 'text-brand-primary' : 'text-brand-light'}`} />
-                Twilio Integration Info
-              </h4>
-              <p className={`text-sm mb-4 ${darkMode ? 'text-white/60' : 'text-white/60'}`}>
-                To connect this agent to a real phone number, configure your Twilio Voice Webhook to point to your deployed app URL:
-              </p>
-              <code className={`block p-4 rounded-xl text-sm font-mono overflow-x-auto border ${darkMode ? 'bg-black/40 text-brand-primary border-white/10' : 'bg-brand-secondary/20 text-brand-light border-white/10'}`}>
-                POST {window.location.origin}/api/twilio/voice
-              </code>
-            </div>
           </div>
         )}
 
