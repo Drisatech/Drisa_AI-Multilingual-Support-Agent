@@ -194,7 +194,13 @@ async function startServer() {
             }]
           },
           callbacks: {
-            onopen: () => console.log('[Gemini] Connected'),
+            onopen: () => {
+              console.log('[Gemini] Connected');
+              // Send initial greeting prompt
+              sessionPromise.then(s => {
+                (s as any).sendRealtimeInput([{ text: "Hello! Please introduce yourself to the customer in a friendly way and ask how you can help them today." }]);
+              });
+            },
             onmessage: async (message) => {
               // Handle transcriptions
               if (message.serverContent?.modelTurn) {
@@ -246,7 +252,7 @@ async function startServer() {
       try {
         const data = JSON.parse(message);
         if (data.event === 'start') {
-          streamSid = data.start.streamSid;
+          streamSid = data.start?.streamSid || null;
           connectToGemini();
         } else if (data.event === 'media' || data.event === 'audio') {
           const payload = getPayload(data);
