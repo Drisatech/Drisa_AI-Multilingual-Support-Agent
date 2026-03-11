@@ -72,7 +72,9 @@ export const db = {
 
   async addFollowUp(followUp: { contactType: string; contactAddress: string; message: string }) {
     const data = {
-      ...followUp,
+      contact_type: followUp.contactType,
+      contact_address: followUp.contactAddress,
+      message: followUp.message,
       status: 'sent',
       created_at: new Date().toISOString()
     };
@@ -83,7 +85,7 @@ export const db = {
     } else {
       const db = getSqlite();
       const stmt = db.prepare('INSERT INTO follow_ups (contact_type, contact_address, message, status, created_at) VALUES (?, ?, ?, ?, ?)');
-      const info = stmt.run(data.contactType, data.contactAddress, data.message, data.status, data.created_at);
+      const info = stmt.run(data.contact_type, data.contact_address, data.message, data.status, data.created_at);
       return { id: info.lastInsertRowid, ...data };
     }
   },
