@@ -22,8 +22,8 @@ Supported languages: English, Hausa, Igbo, Yoruba, Nigerian Pidgin.
 2. Be polite, professional, warm, and helpful.
 3. Understand whether the customer is: Making an inquiry, Requesting support, Asking for price, Asking for recommendation, or Asking for recent products.
 4. When customer describes a need: Ask clarifying questions if necessary, Suggest suitable products from the catalog, Mention benefits, pricing, and availability.
-5. During the conversation: Offer to send product details via WhatsApp or Email. Ask customer to provide preferred contact and confirm it clearly.
-6. After collecting contact: Summarize what will be sent, Thank the customer, End conversation professionally.
+5. During the conversation: Offer to send product details via WhatsApp or Email. Ask customer to provide preferred contact and confirm it clearly. Once confirmed, ALWAYS call the 'sendFollowUp' tool immediately to send the details.
+6. After calling the tool: Summarize what was sent, Thank the customer, End conversation professionally.
 7. When suggesting products: Use persuasive but honest sales tone. Focus on solving customer's problem.
 8. If the customer is unsure: Offer 2-3 options based on budget or use case.
 9. Never hallucinate product data. Only use catalog data provided via function call.
@@ -198,7 +198,7 @@ async function startServer() {
               console.log('[Gemini] Connected');
               // Send initial greeting prompt
               sessionPromise.then(s => {
-                (s as any).sendRealtimeInput([{ text: "Hello! Please introduce yourself to the customer in a friendly way and ask how you can help them today." }]);
+                (s as any).sendRealtimeInput([{ text: "Welcome to Drisa_AI Agent, how can I help you today?" }]);
               });
             },
             onmessage: async (message) => {
@@ -228,9 +228,20 @@ async function startServer() {
                     const products = await db.getProducts((call.args as any)?.query || '');
                     return { id: call.id, name: call.name, response: { result: products } };
                   } else if (call.name === 'sendFollowUp') {
-                    const { contactType, contactAddress, message: msg } = call.args as any;
+                    const args = call.args as any;
+                    const contactType = args.contactType || args.contact_type;
+                    const contactAddress = args.contactAddress || args.contact_address;
+                    const msg = args.message || args.msg;
+                    
+                    console.log(`[Follow-up] Sending ${contactType} to ${contactAddress}`);
+                    console.log(`[Follow-up] Message: ${msg}`);
+                    
+                    if (!contactType || !contactAddress || !msg) {
+                      return { id: call.id, name: call.name, response: { error: "Missing required arguments: contactType, contactAddress, or message" } };
+                    }
+
                     const followUp = await db.addFollowUp({ contactType, contactAddress, message: msg });
-                    return { id: call.id, name: call.name, response: { result: "Follow-up scheduled successfully", id: followUp.id } };
+                    return { id: call.id, name: call.name, response: { result: "Follow-up sent successfully via " + contactType, id: followUp.id } };
                   }
                   return { id: call.id, name: call.name, response: { error: "Unknown function" } };
                 }));

@@ -9,7 +9,10 @@ class AudioStreamer {
     this.nextStartTime = this.audioContext.currentTime;
   }
 
-  addPCM16(base64Audio: string) {
+  async addPCM16(base64Audio: string) {
+    if (this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+    }
     const binaryString = window.atob(base64Audio);
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
@@ -78,6 +81,9 @@ export function useLiveAgent() {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         mediaStreamRef.current = stream;
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+        if (audioContext.state === 'suspended') {
+          await audioContext.resume();
+        }
         audioContextRef.current = audioContext;
         
         const source = audioContext.createMediaStreamSource(stream);

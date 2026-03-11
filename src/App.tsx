@@ -247,9 +247,18 @@ export default function App() {
                       </span>
                       <span className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-zinc-900'}`}>{followUp.contact_address}</span>
                     </div>
-                    <span className={`text-xs ${darkMode ? 'text-white/40' : 'text-zinc-400'}`}>
-                      {new Date(followUp.created_at).toLocaleString()}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${
+                        followUp.status === 'sent' 
+                          ? 'border-emerald-500/50 text-emerald-500 bg-emerald-500/10' 
+                          : 'border-amber-500/50 text-amber-500 bg-amber-500/10'
+                      }`}>
+                        {followUp.status}
+                      </span>
+                      <span className={`text-xs ${darkMode ? 'text-white/40' : 'text-zinc-400'}`}>
+                        {new Date(followUp.created_at).toLocaleString()}
+                      </span>
+                    </div>
                   </div>
                   <div className={`rounded-xl p-4 text-sm whitespace-pre-wrap border transition-colors duration-300 ${darkMode ? 'bg-white/5 text-white/80 border-white/10' : 'bg-zinc-50 text-zinc-700 border-zinc-100'}`}>
                     {followUp.message}
