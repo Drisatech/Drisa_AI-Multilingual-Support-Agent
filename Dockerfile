@@ -22,6 +22,5 @@ ENV NODE_ENV=production
 # Expose the port Cloud Run will use (Google Cloud defaults to 8080)
 EXPOSE 8080
 
-# Start the application using tsx to run the server.ts file directly
-# (This handles the TypeScript stripping automatically)
-CMD ["npx", "tsx", "server.ts"]
+# Start the application using the start script defined in package.json
+CMD ["npm", "start"]
