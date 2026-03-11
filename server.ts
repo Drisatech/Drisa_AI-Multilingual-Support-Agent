@@ -90,9 +90,15 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.join(__dirname, 'dist')));
+    const distPath = path.join(__dirname, 'dist');
+    app.use(express.static(distPath));
     app.get('*', (req, res) => {
-      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+      const indexPath = path.join(distPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(404).send('Not Found: dist/index.html missing. Ensure build completed.');
+      }
     });
   }
 
@@ -101,11 +107,38 @@ async function startServer() {
   });
 
   // --- WebSocket Server for Twilio Streams ---
-  const wss = new WebSocketServer({ server, path: '/api/twilio/stream' });
+  const twilioWss = new WebSocketServer({ noServer: true });
+  const browserWss = new WebSocketServer({ noServer: true });
 
-  wss.on('connection', (ws: WebSocket) => {
+  server.on('upgrade', (request, socket, head) => {
+    const pathname = new URL(request.url!, `http://${request.headers.host}`).pathname;
+
+    if (pathname === '/api/twilio/stream') {
+      twilioWss.handleUpgrade(request, socket, head, (ws) => {
+        twilioWss.emit('connection', ws, request);
+      });
+    } else if (pathname === '/api/browser/stream') {
+      browserWss.handleUpgrade(request, socket, head, (ws) => {
+        browserWss.emit('connection', ws, request);
+      });
+    } else {
+      socket.destroy();
+    }
+  });
+
+  // Twilio Stream Handler (Mu-law 8000Hz)
+  twilioWss.on('connection', (ws: WebSocket) => {
     console.log('[Twilio] New stream connection');
-    
+    setupGeminiProxy(ws, 'audio/x-mulaw;rate=8000', (data) => data.media.payload, (payload, streamSid) => JSON.stringify({ event: 'media', streamSid, media: { payload } }));
+  });
+
+  // Browser Stream Handler (PCM 16000Hz)
+  browserWss.on('connection', (ws: WebSocket) => {
+    console.log('[Browser] New stream connection');
+    setupGeminiProxy(ws, 'audio/pcm;rate=16000', (data) => data.audio, (payload) => JSON.stringify({ event: 'audio', audio: payload }));
+  });
+
+  async function setupGeminiProxy(ws: WebSocket, mimeType: string, getPayload: (data: any) => string, createMessage: (payload: string, streamSid?: string) => string) {
     let streamSid: string | null = null;
     let geminiSession: any = null;
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -161,51 +194,30 @@ async function startServer() {
             }]
           },
           callbacks: {
-            onopen: () => {
-              console.log('[Gemini] Connected');
-            },
+            onopen: () => console.log('[Gemini] Connected'),
             onmessage: async (message) => {
-              // Handle audio output from Gemini
               const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
-              if (base64Audio && streamSid && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                  event: 'media',
-                  streamSid,
-                  media: { payload: base64Audio }
-                }));
+              if (base64Audio && ws.readyState === WebSocket.OPEN) {
+                ws.send(createMessage(base64Audio, streamSid || undefined));
               }
 
-              // Handle tool calls
-              if (message.toolCall) {
-                const functionCalls = message.toolCall.functionCalls;
-                if (functionCalls) {
-                  const responses = await Promise.all(functionCalls.map(async (call) => {
-                    if (call.name === 'lookupCatalog') {
-                      const query = (call.args as any)?.query || '';
-                      const products = await db.getProducts(query);
-                      return { id: call.id, name: call.name, response: { result: products } };
-                    } else if (call.name === 'sendFollowUp') {
-                      const { contactType, contactAddress, message: msg } = call.args as any;
-                      const followUp = await db.addFollowUp({ contactType, contactAddress, message: msg });
-                      return { id: call.id, name: call.name, response: { result: "Follow-up scheduled successfully", id: followUp.id } };
-                    }
-                    return { id: call.id, name: call.name, response: { error: "Unknown function" } };
-                  }));
-                  
-                  sessionPromise.then(session => {
-                    session.sendToolResponse({ functionResponses: responses });
-                  });
-                }
+              if (message.toolCall?.functionCalls) {
+                const responses = await Promise.all(message.toolCall.functionCalls.map(async (call) => {
+                  if (call.name === 'lookupCatalog') {
+                    const products = await db.getProducts((call.args as any)?.query || '');
+                    return { id: call.id, name: call.name, response: { result: products } };
+                  } else if (call.name === 'sendFollowUp') {
+                    const { contactType, contactAddress, message: msg } = call.args as any;
+                    const followUp = await db.addFollowUp({ contactType, contactAddress, message: msg });
+                    return { id: call.id, name: call.name, response: { result: "Follow-up scheduled successfully", id: followUp.id } };
+                  }
+                  return { id: call.id, name: call.name, response: { error: "Unknown function" } };
+                }));
+                sessionPromise.then(s => s.sendToolResponse({ functionResponses: responses }));
               }
             },
-            onerror: (err) => {
-              console.error('[Gemini] Error:', err);
-              ws.close();
-            },
-            onclose: () => {
-              console.log('[Gemini] Closed');
-              ws.close();
-            }
+            onerror: (err) => { console.error('[Gemini] Error:', err); ws.close(); },
+            onclose: () => { console.log('[Gemini] Closed'); ws.close(); }
           }
         });
         geminiSession = await sessionPromise;
@@ -216,35 +228,33 @@ async function startServer() {
     };
 
     ws.on('message', (message: string) => {
-      const data = JSON.parse(message);
-      switch (data.event) {
-        case 'start':
+      try {
+        const data = JSON.parse(message);
+        if (data.event === 'start') {
           streamSid = data.start.streamSid;
-          console.log(`[Twilio] Stream started: ${streamSid}`);
           connectToGemini();
-          break;
-        case 'media':
-          if (geminiSession && data.media.payload) {
-            geminiSession.sendRealtimeInput({
-              media: {
-                data: data.media.payload,
-                mimeType: 'audio/x-mulaw;rate=8000' // Twilio default
-              }
+        } else if (data.event === 'media' || data.event === 'audio') {
+          const payload = getPayload(data);
+          if (geminiSession && payload) {
+            geminiSession.sendRealtimeInput({ media: { data: payload, mimeType } });
+          } else if (!geminiSession && !streamSid) {
+            // For browser, we might not have a 'start' event, so connect on first audio
+            connectToGemini().then(() => {
+              if (geminiSession) geminiSession.sendRealtimeInput({ media: { data: payload, mimeType } });
             });
           }
-          break;
-        case 'stop':
-          console.log(`[Twilio] Stream stopped: ${streamSid}`);
+        } else if (data.event === 'stop') {
           if (geminiSession) geminiSession.close();
-          break;
+        }
+      } catch (e) {
+        console.error('[WS] Message error:', e);
       }
     });
 
     ws.on('close', () => {
-      console.log('[Twilio] Connection closed');
       if (geminiSession) geminiSession.close();
     });
-  });
+  }
 }
 
 startServer();
