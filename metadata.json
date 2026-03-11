@@ -1,5 +1,5 @@
 {
-  "name": "Drisa-AI Multilingual Support Agent",
+  "name": "Drisa_AI Agent",
   "description": "An AI agent that can converse in multiple languages, query product catalogs, and send follow-ups via WhatsApp or Email.",
   "requestFramePermissions": [
     "microphone"
