@@ -196,6 +196,21 @@ async function startServer() {
           callbacks: {
             onopen: () => console.log('[Gemini] Connected'),
             onmessage: async (message) => {
+              // Handle transcriptions
+              if (message.serverContent?.modelTurn) {
+                const text = message.serverContent.modelTurn.parts.find(p => p.text)?.text;
+                if (text) {
+                  ws.send(JSON.stringify({ event: 'transcript', role: 'AI', text }));
+                }
+              }
+              const userTurn = (message.serverContent as any)?.userTurn;
+              if (userTurn) {
+                const text = (userTurn.parts as any[]).find(p => p.text)?.text;
+                if (text) {
+                  ws.send(JSON.stringify({ event: 'transcript', role: 'Customer', text }));
+                }
+              }
+
               const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
               if (base64Audio && ws.readyState === WebSocket.OPEN) {
                 ws.send(createMessage(base64Audio, streamSid || undefined));
