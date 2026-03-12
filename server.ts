@@ -158,9 +158,9 @@ async function startServer() {
       isConnectingGemini = true;
       
       try {
-        console.log('[Gemini] Connecting to Live API with model gemini-2.5-flash-native-audio-preview-12-2025...');
+        console.log('[Gemini] Connecting to Live API with model gemini-2.5-flash-native-audio-preview-09-2025...');
         const sessionPromise = ai.live.connect({
-          model: "gemini-2.5-flash-native-audio-preview-12-2025",
+          model: "gemini-2.5-flash-native-audio-preview-09-2025",
           config: {
             responseModalities: [Modality.AUDIO],
             speechConfig: {
@@ -210,7 +210,22 @@ async function startServer() {
           callbacks: {
             onopen: () => {
               console.log('[Gemini] Connected');
-              // Initial greeting will be handled by the model naturally or upon first user input
+              // Trigger immediate greeting by sending a text prompt to the Live session
+              sessionPromise.then(s => {
+                try {
+                  (s as any).send({
+                    clientContent: {
+                      turns: [{
+                        role: 'user',
+                        parts: [{ text: `The user has just connected. Please greet them immediately and warmly in ${preferredLanguage}. Introduce yourself as the Drisa_AI Support Agent.` }]
+                      }],
+                      turnComplete: true
+                    }
+                  });
+                } catch (e) {
+                  console.error('[Gemini] Failed to send initial greeting:', e);
+                }
+              });
             },
             onmessage: async (message) => {
               // Handle transcriptions

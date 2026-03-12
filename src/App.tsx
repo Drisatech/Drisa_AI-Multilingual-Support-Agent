@@ -10,13 +10,7 @@ export default function App() {
   const [products, setProducts] = useState<Product[]>([]);
   const [followUps, setFollowUps] = useState<FollowUp[]>([]);
   
-  const { isConnected, isConnecting, transcript, error, connect, disconnect } = useLiveAgent();
-
-  const transcriptEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [transcript]);
+  const { isConnected, isConnecting, error, connect, disconnect } = useLiveAgent();
 
   useEffect(() => {
     if (activeTab === 'catalog') {
@@ -162,40 +156,6 @@ export default function App() {
                 Call Us Here For Free
               </div>
             </div>
-
-            {/* Conversation History */}
-            {transcript.length > 0 && (
-              <div className={`mt-8 rounded-3xl shadow-sm border overflow-hidden flex flex-col h-[400px] transition-colors duration-300 ${darkMode ? 'bg-brand-secondary border-white/10' : 'bg-white border-zinc-200'}`}>
-                <div className={`p-4 border-b flex items-center justify-between ${darkMode ? 'border-white/10 bg-white/5' : 'border-zinc-100 bg-zinc-50'}`}>
-                  <h3 className={`font-medium flex items-center gap-2 ${darkMode ? 'text-white' : 'text-zinc-900'}`}>
-                    <MessageSquare className={`w-4 h-4 ${darkMode ? 'text-brand-primary' : 'text-brand-primary'}`} />
-                    Conversation History
-                  </h3>
-                  <span className={`text-xs ${darkMode ? 'text-white/40' : 'text-zinc-400'}`}>{transcript.length} messages</span>
-                </div>
-                <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                  {transcript.map((msg, i) => (
-                    <div 
-                      key={i} 
-                      className={`flex flex-col ${msg.role === 'AI' ? 'items-start' : 'items-end'}`}
-                    >
-                      <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm ${
-                        msg.role === 'AI' 
-                          ? (darkMode ? 'bg-white/10 text-white rounded-tl-none' : 'bg-brand-secondary text-white rounded-tl-none') 
-                          : 'bg-brand-primary text-white rounded-tr-none'
-                      }`}>
-                        <div className="font-bold text-[10px] uppercase tracking-wider mb-1 opacity-70">
-                          {msg.role}
-                        </div>
-                        {msg.text}
-                      </div>
-                    </div>
-                  ))}
-                  <div ref={transcriptEndRef} />
-                </div>
-              </div>
-            )}
-
           </div>
         )}
 
