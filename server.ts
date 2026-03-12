@@ -43,9 +43,10 @@ if (firebaseConfig.projectId && firebaseConfig.projectId !== 'MISSING_PROJECT_ID
 }
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(process.env.PORT) || 8080;
 
-console.log(`[Startup] Starting server on port ${PORT}...`);
+console.log(`[Startup] Initializing server...`);
+console.log(`[Startup] PORT: ${PORT}`);
 console.log(`[Startup] NODE_ENV: ${process.env.NODE_ENV}`);
 
 const SYSTEM_INSTRUCTION = `You are a professional multilingual AI Support Agent as a Sales and Customer Care Representative for DrisaTech (https://drisatech.com.ng).
@@ -72,14 +73,7 @@ Goal: Convert inquiry into qualified lead or sale.`;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Initialize Database
-try {
-  console.log('[Startup] Initializing database...');
-  await db.init();
-  console.log('[Startup] Database initialized');
-} catch (err) {
-  console.error('[Startup] Database initialization failed:', err);
-}
+// Initialize Database moved inside startServer()
 
 // Health Check
 app.get('/api/health', (req, res) => {
@@ -230,6 +224,15 @@ app.post('/api/twilio/voice', (req, res) => {
 
 // --- Vite Middleware for Development ---
 async function startServer() {
+  // Initialize Database
+  try {
+    console.log('[Startup] Initializing database...');
+    await db.init();
+    console.log('[Startup] Database initialized');
+  } catch (err) {
+    console.error('[Startup] Database initialization failed:', err);
+  }
+
   if (process.env.NODE_ENV !== 'production') {
     try {
       const { createServer: createViteServer } = await import('vite');
@@ -255,7 +258,8 @@ async function startServer() {
   }
 
   const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Startup] Server is listening on http://0.0.0.0:${PORT}`);
+    console.log(`[Startup] Server is listening on port ${PORT}`);
+    console.log(`[Startup] Health check: http://localhost:${PORT}/api/health`);
   });
 
   server.on('error', (err) => {
