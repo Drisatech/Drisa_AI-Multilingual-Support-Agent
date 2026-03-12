@@ -9,6 +9,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { GoogleGenAI, Modality, Type } from '@google/genai';
 import { db } from './db.js';
 import { Firestore } from '@google-cloud/firestore';
+import { WaveFile } from 'wavefile';
 const firebaseConfig = {
   projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'MISSING_PROJECT_ID',
   firestoreDatabaseId: process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || '(default)'
@@ -54,6 +55,38 @@ Goal: Convert inquiry into qualified lead or sale.`;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// --- Audio Conversion Helpers ---
+function mulawToPcm16(base64Payload: string): string {
+  try {
+    const buffer = Buffer.from(base64Payload, 'base64');
+    const wav = new WaveFile();
+    wav.fromScratch(1, 8000, '8m', buffer);
+    wav.toSampleRate(16000);
+    wav.toBitDepth('16');
+    const samples = wav.getSamples(false, Int16Array);
+    return Buffer.from(samples.buffer).toString('base64');
+  } catch (e) {
+    console.error('[Audio] mulawToPcm16 failed:', e);
+    return base64Payload;
+  }
+}
+
+function pcm24ToMulaw8(base64Payload: string): string {
+  try {
+    const buffer = Buffer.from(base64Payload, 'base64');
+    const wav = new WaveFile();
+    wav.fromScratch(1, 24000, '16', buffer);
+    wav.toSampleRate(8000);
+    wav.toBitDepth('8m');
+    const dataChunk = (wav.data as any).chunks.find((c: any) => c.chunkId === 'data');
+    if (!dataChunk) throw new Error('Data chunk not found');
+    return Buffer.from(dataChunk.chunkData).toString('base64');
+  } catch (e) {
+    console.error('[Audio] pcm24ToMulaw8 failed:', e);
+    return base64Payload;
+  }
+}
 
 // Initialize Database
 db.init();
@@ -287,7 +320,12 @@ async function startServer() {
   // Twilio Stream Handler (Mu-law 8000Hz)
   twilioWss.on('connection', (ws: WebSocket) => {
     console.log('[Twilio] New stream connection');
-    setupGeminiProxy(ws, 'audio/x-mulaw;rate=8000', (data) => data.media.payload, (payload, streamSid) => JSON.stringify({ event: 'media', streamSid, media: { payload } }));
+    setupGeminiProxy(
+      ws, 
+      'audio/pcm;rate=16000', 
+      (data) => mulawToPcm16(data.media.payload), 
+      (payload, streamSid) => JSON.stringify({ event: 'media', streamSid, media: { payload: pcm24ToMulaw8(payload) } })
+    );
   });
 
   // Browser Stream Handler (PCM 16000Hz)
@@ -324,8 +362,7 @@ async function startServer() {
       isConnectingGemini = true;
       
       try {
-        // Using gemini-2.0-flash-exp as it's the most stable and widely available model for the Live API
-        const modelName = "gemini-2.0-flash-exp";
+        const modelName = "gemini-2.5-flash-native-audio-preview-12-2025";
         console.log(`[Gemini] Connecting to Live API with model ${modelName}...`);
         const sessionPromise = ai.live.connect({
           model: modelName,
@@ -380,29 +417,6 @@ async function startServer() {
           callbacks: {
             onopen: () => {
               console.log('[Gemini] Connected');
-              // Trigger immediate greeting
-              sessionPromise.then(s => {
-                try {
-                  const session = s as any;
-                  const greeting = {
-                    clientContent: {
-                      turns: [{
-                        role: 'user',
-                        parts: [{ text: `The user has just connected. Please greet them immediately and warmly in ${preferredLanguage}. Introduce yourself as the Drisa_AI Support Agent.` }]
-                      }],
-                      turnComplete: true
-                    }
-                  };
-                  
-                  if (typeof session.send === 'function') {
-                    session.send(greeting);
-                  } else if (typeof session.sendRealtimeInput === 'function') {
-                    session.sendRealtimeInput(greeting);
-                  }
-                } catch (e) {
-                  console.error('[Gemini] Failed to send initial greeting:', e);
-                }
-              });
             },
             onmessage: async (message) => {
               // Handle transcriptions
