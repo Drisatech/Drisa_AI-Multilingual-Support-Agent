@@ -180,17 +180,22 @@ app.post('/api/kb/process', async (req, res) => {
 
 // Twilio Voice Webhook
 app.post('/api/twilio/voice', (req, res) => {
+  console.log(`[Twilio] Webhook received: ${req.method} ${req.url}`);
+  console.log(`[Twilio] Body:`, JSON.stringify(req.body));
+  
   try {
     const from = req.body.From || 'Unknown';
     console.log(`[Twilio] Incoming call from: ${from}`);
     
     // Robust host detection
-    let host = req.headers.host;
+    let host = req.get('host');
     if (process.env.APP_URL) {
       try {
-        host = new URL(process.env.APP_URL).host;
+        const appUrl = new URL(process.env.APP_URL);
+        host = appUrl.host;
+        console.log(`[Twilio] Using host from APP_URL: ${host}`);
       } catch (e) {
-        console.warn(`[Twilio] Invalid APP_URL: ${process.env.APP_URL}. Using host header.`);
+        console.warn(`[Twilio] Invalid APP_URL: ${process.env.APP_URL}. Using req.get('host').`);
       }
     }
 
@@ -200,7 +205,7 @@ app.post('/api/twilio/voice', (req, res) => {
     }
 
     const streamUrl = `wss://${host}/api/twilio/stream`;
-    console.log(`[Twilio] Stream URL: ${streamUrl}`);
+    console.log(`[Twilio] Generated Stream URL: ${streamUrl}`);
     
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -214,6 +219,7 @@ app.post('/api/twilio/voice', (req, res) => {
   <Say>I'm sorry, we are having trouble maintaining the connection. Please try calling back later.</Say>
 </Response>`;
 
+    console.log(`[Twilio] Sending TwiML response...`);
     res.type('text/xml');
     res.send(twiml.trim());
   } catch (err) {
@@ -311,21 +317,25 @@ async function startServer() {
         }
         return;
       }
+      console.log(`[Gemini] Using API Key (first 4): ${apiKey.substring(0, 4)}...`);
       const ai = new GoogleGenAI({ apiKey });
 
       if (isConnectingGemini || geminiSession) return;
       isConnectingGemini = true;
       
       try {
-        console.log('[Gemini] Connecting to Live API with model gemini-2.5-flash-native-audio-preview-09-2025...');
+        const modelName = "gemini-2.5-flash-native-audio-preview-12-2025";
+        console.log(`[Gemini] Connecting to Live API with model ${modelName}...`);
         const sessionPromise = ai.live.connect({
-          model: "gemini-2.5-flash-native-audio-preview-09-2025",
+          model: modelName,
           config: {
             responseModalities: [Modality.AUDIO],
             speechConfig: {
               voiceConfig: { prebuiltVoiceConfig: { voiceName: "Zephyr" } },
             },
             systemInstruction: SYSTEM_INSTRUCTION,
+            inputAudioTranscription: {},
+            outputAudioTranscription: {},
             tools: [{
               functionDeclarations: [
                 {
@@ -369,10 +379,11 @@ async function startServer() {
           callbacks: {
             onopen: () => {
               console.log('[Gemini] Connected');
-              // Trigger immediate greeting by sending a text prompt to the Live session
+              // Trigger immediate greeting
               sessionPromise.then(s => {
                 try {
-                  (s as any).send({
+                  const session = s as any;
+                  const greeting = {
                     clientContent: {
                       turns: [{
                         role: 'user',
@@ -380,7 +391,13 @@ async function startServer() {
                       }],
                       turnComplete: true
                     }
-                  });
+                  };
+                  
+                  if (typeof session.send === 'function') {
+                    session.send(greeting);
+                  } else if (typeof session.sendRealtimeInput === 'function') {
+                    session.sendRealtimeInput(greeting);
+                  }
                 } catch (e) {
                   console.error('[Gemini] Failed to send initial greeting:', e);
                 }
@@ -410,13 +427,20 @@ async function startServer() {
               }
 
               if (message.toolCall?.functionCalls) {
+                console.log(`[Gemini] Tool calls received:`, JSON.stringify(message.toolCall.functionCalls));
                 const responses = await Promise.all(message.toolCall.functionCalls.map(async (call) => {
                   if (call.name === 'lookupCatalog') {
                     const query = (call.args as any)?.query || '';
                     let products: any[] = [];
                     
-                    const snapshot = await firestore.collection('products').get();
-                    products = snapshot.docs.map(doc => doc.data());
+                    if (firestore) {
+                      try {
+                        const snapshot = await firestore.collection('products').get();
+                        products = snapshot.docs.map(doc => doc.data());
+                      } catch (e) {
+                        console.error('[Firestore] Failed to fetch products:', e);
+                      }
+                    }
                     
                     if (query) {
                       products = products.filter(p => 
@@ -502,7 +526,7 @@ async function startServer() {
       if (geminiSession) geminiSession.close();
       
       // Log session to Firestore
-      if (transcript.length > 0) {
+      if (transcript.length > 0 && firestore) {
         try {
           const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
           if (!apiKey) throw new Error('Gemini API Key is missing');
