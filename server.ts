@@ -9,7 +9,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { GoogleGenAI, Modality, Type } from '@google/genai';
 import { db } from './db.js';
 import { Firestore } from '@google-cloud/firestore';
-import { WaveFile } from 'wavefile';
+import pkg from 'wavefile';
+const { WaveFile } = pkg;
 const firebaseConfig = {
   projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'MISSING_PROJECT_ID',
   firestoreDatabaseId: process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || '(default)'
@@ -76,12 +77,12 @@ function pcm24ToMulaw8(base64Payload: string): string {
   try {
     const buffer = Buffer.from(base64Payload, 'base64');
     const wav = new WaveFile();
+    // Assuming Gemini output is 24kHz 16-bit Mono PCM
     wav.fromScratch(1, 24000, '16', buffer);
     wav.toSampleRate(8000);
     wav.toBitDepth('8m');
-    const dataChunk = (wav.data as any).chunks.find((c: any) => c.chunkId === 'data');
-    if (!dataChunk) throw new Error('Data chunk not found');
-    return Buffer.from(dataChunk.chunkData).toString('base64');
+    const samples = wav.getSamples(false, Uint8Array);
+    return Buffer.from(samples.buffer).toString('base64');
   } catch (e) {
     console.error('[Audio] pcm24ToMulaw8 failed:', e);
     return base64Payload;
@@ -419,6 +420,7 @@ async function startServer() {
               console.log('[Gemini] Connected');
             },
             onmessage: async (message) => {
+              console.log('[Gemini] Message received:', JSON.stringify(message).substring(0, 200) + '...');
               // Handle transcriptions
               if (message.serverContent?.modelTurn) {
                 const text = message.serverContent.modelTurn.parts.find(p => p.text)?.text;
@@ -487,11 +489,15 @@ async function startServer() {
               }
             },
             onerror: (err) => { 
-              console.error('[Gemini] Error:', err); 
+              console.error('[Gemini] Error details:', JSON.stringify(err)); 
+              console.error('[Gemini] Error message:', err.message);
               ws.send(JSON.stringify({ event: 'error', message: 'Gemini connection error' }));
               ws.close(); 
             },
-            onclose: () => { console.log('[Gemini] Closed'); ws.close(); }
+            onclose: (event) => { 
+              console.log('[Gemini] Closed. Event:', JSON.stringify(event)); 
+              ws.close(); 
+            }
           }
         });
         geminiSession = await sessionPromise;
