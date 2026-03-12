@@ -13,7 +13,11 @@ const USE_FIRESTORE = process.env.USE_FIRESTORE === 'true';
 let sqlite: any = null;
 function getSqlite() {
   if (!sqlite) {
-    const dbPath = path.resolve(__dirname, 'database.sqlite');
+    // On Cloud Run (production), the root filesystem is read-only.
+    // We use /tmp for the SQLite database if not using Firestore.
+    const dbPath = process.env.NODE_ENV === 'production' 
+      ? '/tmp/database.sqlite' 
+      : path.resolve(__dirname, 'database.sqlite');
     sqlite = new Database(dbPath);
   }
   return sqlite;

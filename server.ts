@@ -20,19 +20,26 @@ const firebaseConfig = {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-let firestore: Firestore;
-try {
-  firestore = new Firestore({
-    projectId: firebaseConfig.projectId,
-    databaseId: firebaseConfig.firestoreDatabaseId
-  });
-} catch (e) {
-  console.error("Firestore initialization failed:", e);
-  firestore = null as any;
+let firestore: Firestore | null = null;
+if (firebaseConfig.projectId && firebaseConfig.projectId !== 'MISSING_PROJECT_ID') {
+  try {
+    firestore = new Firestore({
+      projectId: firebaseConfig.projectId,
+      databaseId: firebaseConfig.firestoreDatabaseId
+    });
+    console.log(`[Firestore] Initialized with project: ${firebaseConfig.projectId}`);
+  } catch (e) {
+    console.error("[Firestore] Initialization failed:", e);
+  }
+} else {
+  console.warn("[Firestore] Skipping initialization: VITE_FIREBASE_PROJECT_ID is missing.");
 }
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
+
+console.log(`[Startup] Starting server on port ${PORT}...`);
+console.log(`[Startup] NODE_ENV: ${process.env.NODE_ENV}`);
 
 const SYSTEM_INSTRUCTION = `You are a professional multilingual AI Support Agent as a Sales and Customer Care Representative for DrisaTech (https://drisatech.com.ng).
 
@@ -100,11 +107,7 @@ app.post('/api/kb/process', async (req, res) => {
     let textToProcess = content;
 
     if (type === 'url') {
-      // In a real app, we'd fetch the URL content here. 
-      // For this demo, we'll use Gemini's urlContext if possible, 
-      // but since this is a backend route, we'll just simulate or use a simple fetch if allowed.
-      // Since we can't easily fetch external URLs from this sandbox without a library, 
-      // we'll ask Gemini to "imagine" the content if it's a known site, or just use the URL as a prompt.
+      // ...
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: `Extract product information (name, description, price in Naira, category) from this source: ${content}. If it's a URL, use your knowledge of the site or common product patterns. Return a JSON array of products.`,
@@ -127,12 +130,14 @@ app.post('/api/kb/process', async (req, res) => {
       });
       
       const products = JSON.parse(response.text);
-      const batch = firestore.batch();
-      products.forEach((p: any) => {
-        const docRef = firestore.collection('products').doc();
-        batch.set(docRef, { ...p, updatedAt: new Date().toISOString() });
-      });
-      await batch.commit();
+      if (firestore) {
+        const batch = firestore.batch();
+        products.forEach((p: any) => {
+          const docRef = firestore.collection('products').doc();
+          batch.set(docRef, { ...p, updatedAt: new Date().toISOString() });
+        });
+        await batch.commit();
+      }
     } else {
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
@@ -156,22 +161,26 @@ app.post('/api/kb/process', async (req, res) => {
       });
       
       const products = JSON.parse(response.text);
-      const batch = firestore.batch();
-      products.forEach((p: any) => {
-        const docRef = firestore.collection('products').doc();
-        batch.set(docRef, { ...p, updatedAt: new Date().toISOString() });
-      });
-      await batch.commit();
+      if (firestore) {
+        const batch = firestore.batch();
+        products.forEach((p: any) => {
+          const docRef = firestore.collection('products').doc();
+          batch.set(docRef, { ...p, updatedAt: new Date().toISOString() });
+        });
+        await batch.commit();
+      }
     }
 
     // Update source status
-    const sources = await firestore.collection('knowledge_sources')
-      .where('content', '==', content)
-      .limit(1)
-      .get();
-    
-    if (!sources.empty) {
-      await sources.docs[0].ref.update({ status: 'processed' });
+    if (firestore) {
+      const sources = await firestore.collection('knowledge_sources')
+        .where('content', '==', content)
+        .limit(1)
+        .get();
+      
+      if (!sources.empty) {
+        await sources.docs[0].ref.update({ status: 'processed' });
+      }
     }
 
     res.json({ success: true });
@@ -228,7 +237,7 @@ async function startServer() {
   }
 
   const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`[Startup] Server is listening on http://0.0.0.0:${PORT}`);
   });
 
   // --- WebSocket Server for Twilio Streams ---
@@ -418,10 +427,15 @@ async function startServer() {
                     const query = (call.args as any)?.query || '';
                     let products: any[] = [];
                     
-                    const snapshot = await firestore.collection('products').get();
-                    products = snapshot.docs.map(doc => doc.data());
+                    if (firestore) {
+                      const snapshot = await firestore.collection('products').get();
+                      products = snapshot.docs.map(doc => doc.data());
+                    } else {
+                      // Fallback to SQLite if Firestore is not available
+                      products = await db.getProducts(query);
+                    }
                     
-                    if (query) {
+                    if (query && firestore) {
                       products = products.filter(p => 
                         p.name.toLowerCase().includes(query.toLowerCase()) || 
                         p.description.toLowerCase().includes(query.toLowerCase())
@@ -524,17 +538,21 @@ async function startServer() {
           
           const { summary, outcome } = JSON.parse(summaryResponse.text);
           
-          await firestore.collection('sessions').add({
-            startTime,
-            endTime: new Date().toISOString(),
-            callerId: streamSid || 'browser-user',
-            preferredLanguage,
-            transcript,
-            summary,
-            outcome,
-            createdAt: new Date().toISOString()
-          });
-          console.log('[Firestore] Session logged');
+          if (firestore) {
+            await firestore.collection('sessions').add({
+              startTime,
+              endTime: new Date().toISOString(),
+              callerId: streamSid || 'browser-user',
+              preferredLanguage,
+              transcript,
+              summary,
+              outcome,
+              createdAt: new Date().toISOString()
+            });
+            console.log('[Firestore] Session logged');
+          } else {
+            console.warn('[Firestore] Not initialized, session not logged');
+          }
         } catch (err) {
           console.error('[Firestore] Failed to log session:', err);
         }
