@@ -180,27 +180,46 @@ app.post('/api/kb/process', async (req, res) => {
 
 // Twilio Voice Webhook
 app.post('/api/twilio/voice', (req, res) => {
-  const from = req.body.From || 'Unknown';
-  console.log(`[Twilio] Incoming call from: ${from}`);
-  console.log(`[Twilio] Headers:`, JSON.stringify(req.headers));
-  
-  // Use APP_URL if set, otherwise fallback to host header
-  const host = process.env.APP_URL ? new URL(process.env.APP_URL).host : req.headers.host;
-  const streamUrl = `wss://${host}/api/twilio/stream`;
-  console.log(`[Twilio] Stream URL: ${streamUrl}`);
-  
-  const twiml = `
-    <Response>
-      <Say>Welcome to DrisaTech AI Support. Please wait while we connect you.</Say>
-      <Connect>
-        <Stream url="${streamUrl}">
-          <Parameter name="from" value="${from}" />
-        </Stream>
-      </Connect>
-    </Response>
-  `;
-  res.type('text/xml');
-  res.send(twiml);
+  try {
+    const from = req.body.From || 'Unknown';
+    console.log(`[Twilio] Incoming call from: ${from}`);
+    
+    // Robust host detection
+    let host = req.headers.host;
+    if (process.env.APP_URL) {
+      try {
+        host = new URL(process.env.APP_URL).host;
+      } catch (e) {
+        console.warn(`[Twilio] Invalid APP_URL: ${process.env.APP_URL}. Using host header.`);
+      }
+    }
+
+    if (!host) {
+      console.error('[Twilio] Could not determine host for WebSocket stream');
+      return res.status(500).send('Could not determine host');
+    }
+
+    const streamUrl = `wss://${host}/api/twilio/stream`;
+    console.log(`[Twilio] Stream URL: ${streamUrl}`);
+    
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say>Welcome to DrisaTech AI Support. Please wait while we connect you.</Say>
+  <Connect>
+    <Stream url="${streamUrl}">
+      <Parameter name="from" value="${from}" />
+    </Stream>
+  </Connect>
+  <Pause length="2"/>
+  <Say>I'm sorry, we are having trouble maintaining the connection. Please try calling back later.</Say>
+</Response>`;
+
+    res.type('text/xml');
+    res.send(twiml.trim());
+  } catch (err) {
+    console.error('[Twilio] Webhook error:', err);
+    res.status(500).send('Internal Server Error');
+  }
 });
 
 // --- Vite Middleware for Development ---
@@ -233,22 +252,28 @@ async function startServer() {
   const browserWss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (request, socket, head) => {
-    const url = new URL(request.url!, `http://${request.headers.host}`);
-    const pathname = url.pathname;
-    console.log(`[Upgrade] Request for ${pathname}`);
-    
-    if (pathname === '/api/twilio/stream') {
-      console.log('[Upgrade] Handling Twilio stream upgrade');
-      twilioWss.handleUpgrade(request, socket, head, (ws) => {
-        twilioWss.emit('connection', ws, request);
-      });
-    } else if (pathname === '/api/browser/stream') {
-      console.log('[Upgrade] Handling Browser stream upgrade');
-      browserWss.handleUpgrade(request, socket, head, (ws) => {
-        browserWss.emit('connection', ws, request);
-      });
-    } else {
-      console.log(`[Upgrade] Path ${pathname} not found, destroying socket`);
+    try {
+      const host = request.headers.host || 'localhost';
+      const url = new URL(request.url!, `http://${host}`);
+      const pathname = url.pathname;
+      console.log(`[Upgrade] Request for ${pathname}`);
+      
+      if (pathname.startsWith('/api/twilio/stream')) {
+        console.log('[Upgrade] Handling Twilio stream upgrade');
+        twilioWss.handleUpgrade(request, socket, head, (ws) => {
+          twilioWss.emit('connection', ws, request);
+        });
+      } else if (pathname.startsWith('/api/browser/stream')) {
+        console.log('[Upgrade] Handling Browser stream upgrade');
+        browserWss.handleUpgrade(request, socket, head, (ws) => {
+          browserWss.emit('connection', ws, request);
+        });
+      } else {
+        console.log(`[Upgrade] Path ${pathname} not found, destroying socket`);
+        socket.destroy();
+      }
+    } catch (err) {
+      console.error('[Upgrade] Error during upgrade:', err);
       socket.destroy();
     }
   });
@@ -277,12 +302,17 @@ async function startServer() {
     const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
     const connectToGemini = async () => {
-      if (!ai) {
+      const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+      if (!apiKey) {
         console.error('[Gemini] API Key is missing, cannot connect');
-        ws.send(JSON.stringify({ event: 'error', message: 'Gemini API Key is missing' }));
-        ws.close();
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ event: 'error', message: 'Gemini API Key is missing' }));
+          ws.close();
+        }
         return;
       }
+      const ai = new GoogleGenAI({ apiKey });
+
       if (isConnectingGemini || geminiSession) return;
       isConnectingGemini = true;
       
@@ -435,27 +465,32 @@ async function startServer() {
       }
     };
 
-    ws.on('message', (message: string) => {
+    ws.on('message', (message: any) => {
       try {
-        const data = JSON.parse(message);
+        const messageStr = message.toString();
+        const data = JSON.parse(messageStr);
+        
         if (data.event === 'start') {
           streamSid = data.start?.streamSid || data.streamSid || null;
-          const from = data.start?.customParameters?.from;
-          if (from) streamSid = from; // Use phone number as callerId if available
+          console.log(`[Twilio] Stream started with SID: ${streamSid}`);
           
+          const from = data.start?.customParameters?.from;
           preferredLanguage = data.preferredLanguage || 'English';
           connectToGemini();
         } else if (data.event === 'media' || data.event === 'audio') {
           const payload = getPayload(data);
+          if (data.streamSid && !streamSid) streamSid = data.streamSid;
+          
           if (geminiSession && payload) {
             geminiSession.sendRealtimeInput({ media: { data: payload, mimeType } });
-          } else if (!geminiSession && !streamSid) {
+          } else if (!geminiSession && !streamSid && data.event === 'audio') {
             // For browser, we might not have a 'start' event, so connect on first audio
             connectToGemini().then(() => {
               if (geminiSession) geminiSession.sendRealtimeInput({ media: { data: payload, mimeType } });
             });
           }
         } else if (data.event === 'stop') {
+          console.log(`[Twilio] Stream stopped: ${streamSid}`);
           if (geminiSession) geminiSession.close();
         }
       } catch (e) {

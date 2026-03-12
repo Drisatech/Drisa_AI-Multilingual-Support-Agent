@@ -11,23 +11,42 @@ const USE_FIRESTORE = process.env.USE_FIRESTORE === 'true';
 
 // --- SQLite Setup ---
 let sqlite: any = null;
-function getSqlite() {
+async function getSqlite() {
   if (!sqlite) {
-    const dbPath = path.resolve(__dirname, 'database.sqlite');
-    sqlite = new Database(dbPath);
+    try {
+      const { default: Database } = await import('better-sqlite3');
+      // On Cloud Run (production), the root filesystem is read-only.
+      // We use /tmp for the SQLite database if not using Firestore.
+      const dbPath = process.env.NODE_ENV === 'production' 
+        ? '/tmp/database.sqlite' 
+        : path.resolve(__dirname, 'database.sqlite');
+      console.log(`[Database] Opening SQLite at ${dbPath}`);
+      sqlite = new Database(dbPath);
+    } catch (err) {
+      console.error('[Database] Failed to initialize SQLite:', err);
+      throw err;
+    }
   }
   return sqlite;
 }
 
 // --- Firestore Setup ---
 let firestore: Firestore | null = null;
-if (USE_FIRESTORE) {
-  firestore = new Firestore();
+function getFirestore() {
+  if (USE_FIRESTORE && !firestore) {
+    try {
+      firestore = new Firestore();
+    } catch (err) {
+      console.error('[Database] Failed to initialize Firestore:', err);
+    }
+  }
+  return firestore;
 }
 
 // --- Database Interface ---
 export const db = {
   async getProducts(query?: string) {
+    const firestore = getFirestore();
     if (USE_FIRESTORE && firestore) {
       let q: any = firestore.collection('products');
       if (query) {
@@ -38,7 +57,7 @@ export const db = {
       const snapshot = await q.get();
       return snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
     } else {
-      const db = getSqlite();
+      const db = await getSqlite();
       if (query) {
         const stmt = db.prepare('SELECT * FROM products WHERE name LIKE ? OR description LIKE ? OR category LIKE ?');
         const searchStr = `%${query}%`;
@@ -49,11 +68,12 @@ export const db = {
   },
 
   async addProduct(product: { name: string; description: string; price: number; category: string }) {
+    const firestore = getFirestore();
     if (USE_FIRESTORE && firestore) {
       const docRef = await firestore.collection('products').add(product);
       return { id: docRef.id, ...product };
     } else {
-      const db = getSqlite();
+      const db = await getSqlite();
       const stmt = db.prepare('INSERT INTO products (name, description, price, category) VALUES (?, ?, ?, ?)');
       const info = stmt.run(product.name, product.description, product.price, product.category);
       return { id: info.lastInsertRowid, ...product };
@@ -61,11 +81,12 @@ export const db = {
   },
 
   async getFollowUps() {
+    const firestore = getFirestore();
     if (USE_FIRESTORE && firestore) {
       const snapshot = await firestore.collection('follow_ups').orderBy('created_at', 'desc').get();
       return snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
     } else {
-      const db = getSqlite();
+      const db = await getSqlite();
       return db.prepare('SELECT * FROM follow_ups ORDER BY created_at DESC').all();
     }
   },
@@ -79,11 +100,12 @@ export const db = {
       created_at: new Date().toISOString()
     };
 
+    const firestore = getFirestore();
     if (USE_FIRESTORE && firestore) {
       const docRef = await firestore.collection('follow_ups').add(data);
       return { id: docRef.id, ...data };
     } else {
-      const db = getSqlite();
+      const db = await getSqlite();
       const stmt = db.prepare('INSERT INTO follow_ups (contact_type, contact_address, message, status, created_at) VALUES (?, ?, ?, ?, ?)');
       const info = stmt.run(data.contact_type, data.contact_address, data.message, data.status, data.created_at);
       return { id: info.lastInsertRowid, ...data };
@@ -91,9 +113,9 @@ export const db = {
   },
 
   // Initialize tables/collections
-  init() {
+  async init() {
     if (!USE_FIRESTORE) {
-      const db = getSqlite();
+      const db = await getSqlite();
       db.exec(`
         CREATE TABLE IF NOT EXISTS products (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
