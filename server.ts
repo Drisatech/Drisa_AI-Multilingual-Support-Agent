@@ -310,7 +310,7 @@ async function startServer() {
     const connectToGemini = async () => {
       const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
       if (!apiKey) {
-        console.error('[Gemini] API Key is missing, cannot connect');
+        console.error('[Gemini] API Key is missing, cannot connect. Please check your environment variables.');
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ event: 'error', message: 'Gemini API Key is missing' }));
           ws.close();
@@ -324,7 +324,8 @@ async function startServer() {
       isConnectingGemini = true;
       
       try {
-        const modelName = "gemini-2.5-flash-native-audio-preview-12-2025";
+        // Using gemini-2.0-flash-exp as it's the most stable and widely available model for the Live API
+        const modelName = "gemini-2.0-flash-exp";
         console.log(`[Gemini] Connecting to Live API with model ${modelName}...`);
         const sessionPromise = ai.live.connect({
           model: modelName,
@@ -493,6 +494,7 @@ async function startServer() {
       try {
         const messageStr = message.toString();
         const data = JSON.parse(messageStr);
+        console.log(`[WS] Received event: ${data.event}`);
         
         if (data.event === 'start') {
           streamSid = data.start?.streamSid || data.streamSid || null;
@@ -503,12 +505,16 @@ async function startServer() {
           connectToGemini();
         } else if (data.event === 'media' || data.event === 'audio') {
           const payload = getPayload(data);
-          if (data.streamSid && !streamSid) streamSid = data.streamSid;
+          if (data.streamSid && !streamSid) {
+            streamSid = data.streamSid;
+            console.log(`[Twilio] Captured streamSid from media: ${streamSid}`);
+          }
           
           if (geminiSession && payload) {
             geminiSession.sendRealtimeInput({ media: { data: payload, mimeType } });
-          } else if (!geminiSession && !streamSid && data.event === 'audio') {
+          } else if (!geminiSession && !isConnectingGemini && !streamSid && data.event === 'audio') {
             // For browser, we might not have a 'start' event, so connect on first audio
+            console.log('[Browser] Connecting to Gemini on first audio packet');
             connectToGemini().then(() => {
               if (geminiSession) geminiSession.sendRealtimeInput({ media: { data: payload, mimeType } });
             });
@@ -522,7 +528,12 @@ async function startServer() {
       }
     });
 
+    ws.on('error', (err) => {
+      console.error('[WS] WebSocket error:', err);
+    });
+
     ws.on('close', async () => {
+      console.log(`[WS] Connection closed: ${streamSid}`);
       if (geminiSession) geminiSession.close();
       
       // Log session to Firestore
