@@ -2,6 +2,17 @@
 
 A professional multilingual AI Voice Support Agent built with React, Express, and Gemini 2.5 Flash.
 
+![AI](https://img.shields.io/badge/Artificial_Intelligence-Voice_AI-blue)
+![LLM](https://img.shields.io/badge/LLM-Gemini_2.5_Flash-purple)
+![Node.js](https://img.shields.io/badge/Backend-Node.js-green?logo=node.js)
+![React](https://img.shields.io/badge/Frontend-React-blue?logo=react)
+![WebSockets](https://img.shields.io/badge/Realtime-WebSockets-orange)
+![Twilio](https://img.shields.io/badge/Telephony-Twilio-red?logo=twilio)
+![SQLite](https://img.shields.io/badge/Database-SQLite-blue?logo=sqlite)
+![Firestore](https://img.shields.io/badge/Cloud-Firebase_Firestore-yellow?logo=firebase)
+![AI_Agent](https://img.shields.io/badge/AI-Agent_Framework-black)
+![Voice_AI](https://img.shields.io/badge/Voice-AI_Assistant-success)
+
 ## Architecture
 
 ![Drisa_AI Architecture Diagram](./public/architecture.svg)
@@ -53,19 +64,6 @@ https://drisa-ai-agent-448742322230.us-central1.run.app
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-blue?logo=linkedin)](https://linkedin.com/in/aliyu-idris)
 [![GitHub](https://img.shields.io/badge/GitHub-Drisatech-black?logo=github)](https://github.com/Drisatech)
 [![Email](https://img.shields.io/badge/Email-drisatech%40gmail.com-red?logo=gmail)](mailto:drisatech@gmail.com)
-[![Azure](https://img.shields.io/badge/Microsoft_Azure-Data_Engineer-0078D4?logo=microsoft-azure)]()
-[![AWS](https://img.shields.io/badge/AWS-Data_Pipelines-FF9900?logo=amazon-aws)]()
-
-![AI](https://img.shields.io/badge/Artificial_Intelligence-Voice_AI-blue)
-![LLM](https://img.shields.io/badge/LLM-Gemini_2.5_Flash-purple)
-![Node.js](https://img.shields.io/badge/Backend-Node.js-green?logo=node.js)
-![React](https://img.shields.io/badge/Frontend-React-blue?logo=react)
-![WebSockets](https://img.shields.io/badge/Realtime-WebSockets-orange)
-![Twilio](https://img.shields.io/badge/Telephony-Twilio-red?logo=twilio)
-![SQLite](https://img.shields.io/badge/Database-SQLite-blue?logo=sqlite)
-![Firestore](https://img.shields.io/badge/Cloud-Firebase_Firestore-yellow?logo=firebase)
-![AI_Agent](https://img.shields.io/badge/AI-Agent_Framework-black)
-![Voice_AI](https://img.shields.io/badge/Voice-AI_Assistant-success)
 
 ---
 
