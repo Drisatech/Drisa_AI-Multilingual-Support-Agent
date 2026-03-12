@@ -1,24 +1,14 @@
 import 'dotenv/config';
-
-process.on('uncaughtException', (err) => {
-  console.error('[Fatal] Uncaught Exception:', err);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('[Fatal] Unhandled Rejection at:', promise, 'reason:', reason);
-});
-
 import express from 'express';
+import { createServer as createViteServer } from 'vite';
+import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
 import { GoogleGenAI, Modality, Type } from '@google/genai';
-import { db } from './db';
+import { db } from './db.js';
 import { Firestore } from '@google-cloud/firestore';
-import alawmulaw from 'alawmulaw';
-import { resample } from 'wave-resampler';
-
 const firebaseConfig = {
   projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'MISSING_PROJECT_ID',
   firestoreDatabaseId: process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || '(default)'
@@ -27,27 +17,19 @@ const firebaseConfig = {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-let firestore: Firestore | null = null;
-if (firebaseConfig.projectId && firebaseConfig.projectId !== 'MISSING_PROJECT_ID') {
-  try {
-    firestore = new Firestore({
-      projectId: firebaseConfig.projectId,
-      databaseId: firebaseConfig.firestoreDatabaseId
-    });
-    console.log(`[Firestore] Initialized with project: ${firebaseConfig.projectId}`);
-  } catch (e) {
-    console.error("[Firestore] Initialization failed:", e);
-  }
-} else {
-  console.warn("[Firestore] Skipping initialization: VITE_FIREBASE_PROJECT_ID is missing.");
+let firestore: Firestore;
+try {
+  firestore = new Firestore({
+    projectId: firebaseConfig.projectId,
+    databaseId: firebaseConfig.firestoreDatabaseId
+  });
+} catch (e) {
+  console.error("Firestore initialization failed:", e);
+  firestore = null as any;
 }
 
 const app = express();
-const PORT = Number(process.env.PORT) || 8080;
-
-console.log(`[Startup] Initializing server...`);
-console.log(`[Startup] PORT: ${PORT}`);
-console.log(`[Startup] NODE_ENV: ${process.env.NODE_ENV}`);
+const PORT = Number(process.env.PORT) || 3000;
 
 const SYSTEM_INSTRUCTION = `You are a professional multilingual AI Support Agent as a Sales and Customer Care Representative for DrisaTech (https://drisatech.com.ng).
 
@@ -73,7 +55,8 @@ Goal: Convert inquiry into qualified lead or sale.`;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Initialize Database moved inside startServer()
+// Initialize Database
+db.init();
 
 // Health Check
 app.get('/api/health', (req, res) => {
@@ -114,7 +97,11 @@ app.post('/api/kb/process', async (req, res) => {
     let textToProcess = content;
 
     if (type === 'url') {
-      // ...
+      // In a real app, we'd fetch the URL content here. 
+      // For this demo, we'll use Gemini's urlContext if possible, 
+      // but since this is a backend route, we'll just simulate or use a simple fetch if allowed.
+      // Since we can't easily fetch external URLs from this sandbox without a library, 
+      // we'll ask Gemini to "imagine" the content if it's a known site, or just use the URL as a prompt.
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: `Extract product information (name, description, price in Naira, category) from this source: ${content}. If it's a URL, use your knowledge of the site or common product patterns. Return a JSON array of products.`,
@@ -137,14 +124,12 @@ app.post('/api/kb/process', async (req, res) => {
       });
       
       const products = JSON.parse(response.text);
-      if (firestore) {
-        const batch = firestore.batch();
-        products.forEach((p: any) => {
-          const docRef = firestore.collection('products').doc();
-          batch.set(docRef, { ...p, updatedAt: new Date().toISOString() });
-        });
-        await batch.commit();
-      }
+      const batch = firestore.batch();
+      products.forEach((p: any) => {
+        const docRef = firestore.collection('products').doc();
+        batch.set(docRef, { ...p, updatedAt: new Date().toISOString() });
+      });
+      await batch.commit();
     } else {
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
@@ -168,26 +153,22 @@ app.post('/api/kb/process', async (req, res) => {
       });
       
       const products = JSON.parse(response.text);
-      if (firestore) {
-        const batch = firestore.batch();
-        products.forEach((p: any) => {
-          const docRef = firestore.collection('products').doc();
-          batch.set(docRef, { ...p, updatedAt: new Date().toISOString() });
-        });
-        await batch.commit();
-      }
+      const batch = firestore.batch();
+      products.forEach((p: any) => {
+        const docRef = firestore.collection('products').doc();
+        batch.set(docRef, { ...p, updatedAt: new Date().toISOString() });
+      });
+      await batch.commit();
     }
 
     // Update source status
-    if (firestore) {
-      const sources = await firestore.collection('knowledge_sources')
-        .where('content', '==', content)
-        .limit(1)
-        .get();
-      
-      if (!sources.empty) {
-        await sources.docs[0].ref.update({ status: 'processed' });
-      }
+    const sources = await firestore.collection('knowledge_sources')
+      .where('content', '==', content)
+      .limit(1)
+      .get();
+    
+    if (!sources.empty) {
+      await sources.docs[0].ref.update({ status: 'processed' });
     }
 
     res.json({ success: true });
@@ -224,34 +205,12 @@ app.post('/api/twilio/voice', (req, res) => {
 
 // --- Vite Middleware for Development ---
 async function startServer() {
-  // Start listening IMMEDIATELY to satisfy Cloud Run health checks
-  const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Startup] Server is listening on port ${PORT}`);
-    console.log(`[Startup] Health check: http://localhost:${PORT}/api/health`);
-  });
-
-  server.on('error', (err) => {
-    console.error('[Startup] Server error:', err);
-  });
-
-  // Initialize Database in background
-  db.init().then(() => {
-    console.log('[Startup] Database initialized');
-  }).catch((err) => {
-    console.error('[Startup] Database initialization failed:', err);
-  });
-
   if (process.env.NODE_ENV !== 'production') {
-    try {
-      const { createServer: createViteServer } = await import('vite');
-      const vite = await createViteServer({
-        server: { middlewareMode: true },
-        appType: 'spa',
-      });
-      app.use(vite.middlewares);
-    } catch (err) {
-      console.error('[Startup] Failed to load Vite:', err);
-    }
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
   } else {
     const distPath = path.join(__dirname, 'dist');
     app.use(express.static(distPath));
@@ -264,6 +223,10 @@ async function startServer() {
       }
     });
   }
+
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
 
   // --- WebSocket Server for Twilio Streams ---
   const twilioWss = new WebSocketServer({ noServer: true });
@@ -293,37 +256,7 @@ async function startServer() {
   // Twilio Stream Handler (Mu-law 8000Hz)
   twilioWss.on('connection', (ws: WebSocket) => {
     console.log('[Twilio] New stream connection');
-    
-    // Transcoding functions for Twilio
-    const decodeTwilio = (payload: string) => {
-      const buffer = Buffer.from(payload, 'base64');
-      const pcm8k = alawmulaw.mulaw.decode(buffer); // Int16Array 8kHz
-      const pcm16k = resample(pcm8k, 8000, 16000); // Float64Array or similar
-      
-      // Convert to Int16 for Gemini
-      const int16 = new Int16Array(pcm16k.length);
-      for (let i = 0; i < pcm16k.length; i++) int16[i] = Math.max(-32768, Math.min(32767, pcm16k[i]));
-      return Buffer.from(int16.buffer).toString('base64');
-    };
-
-    const encodeTwilio = (base64PCM: string) => {
-      const buffer = Buffer.from(base64PCM, 'base64');
-      const pcm24k = new Int16Array(buffer.buffer, buffer.byteOffset, buffer.length / 2);
-      const pcm8k = resample(pcm24k, 24000, 8000);
-      
-      const int16 = new Int16Array(pcm8k.length);
-      for (let i = 0; i < pcm8k.length; i++) int16[i] = Math.max(-32768, Math.min(32767, pcm8k[i]));
-      
-      const mulawBuffer = alawmulaw.mulaw.encode(int16);
-      return Buffer.from(mulawBuffer).toString('base64');
-    };
-
-    setupGeminiProxy(
-      ws, 
-      'audio/pcm;rate=16000', 
-      (data) => decodeTwilio(data.media.payload), 
-      (payload, streamSid) => JSON.stringify({ event: 'media', streamSid, media: { payload: encodeTwilio(payload) } })
-    );
+    setupGeminiProxy(ws, 'audio/x-mulaw;rate=8000', (data) => data.media.payload, (payload, streamSid) => JSON.stringify({ event: 'media', streamSid, media: { payload } }));
   });
 
   // Browser Stream Handler (PCM 16000Hz)
@@ -452,15 +385,10 @@ async function startServer() {
                     const query = (call.args as any)?.query || '';
                     let products: any[] = [];
                     
-                    if (firestore) {
-                      const snapshot = await firestore.collection('products').get();
-                      products = snapshot.docs.map(doc => doc.data());
-                    } else {
-                      // Fallback to SQLite if Firestore is not available
-                      products = await db.getProducts(query);
-                    }
+                    const snapshot = await firestore.collection('products').get();
+                    products = snapshot.docs.map(doc => doc.data());
                     
-                    if (query && firestore) {
+                    if (query) {
                       products = products.filter(p => 
                         p.name.toLowerCase().includes(query.toLowerCase()) || 
                         p.description.toLowerCase().includes(query.toLowerCase())
@@ -563,21 +491,17 @@ async function startServer() {
           
           const { summary, outcome } = JSON.parse(summaryResponse.text);
           
-          if (firestore) {
-            await firestore.collection('sessions').add({
-              startTime,
-              endTime: new Date().toISOString(),
-              callerId: streamSid || 'browser-user',
-              preferredLanguage,
-              transcript,
-              summary,
-              outcome,
-              createdAt: new Date().toISOString()
-            });
-            console.log('[Firestore] Session logged');
-          } else {
-            console.warn('[Firestore] Not initialized, session not logged');
-          }
+          await firestore.collection('sessions').add({
+            startTime,
+            endTime: new Date().toISOString(),
+            callerId: streamSid || 'browser-user',
+            preferredLanguage,
+            transcript,
+            summary,
+            outcome,
+            createdAt: new Date().toISOString()
+          });
+          console.log('[Firestore] Session logged');
         } catch (err) {
           console.error('[Firestore] Failed to log session:', err);
         }
