@@ -1,0 +1,53 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: sessions
+    // Fields: startTime, endTime, callerId, preferredLanguage, transcript, summary, outcome
+    //
+    // Collection: products
+    // Fields: name, description, price, category, imageUrl, updatedAt
+    //
+    // Collection: knowledge_sources
+    // Fields: type, content, status, createdAt
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "drisatech@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    // Sessions: AI Agent (server) can create/update. Admin can read.
+    match /sessions/{sessionId} {
+      allow read: if isAdmin();
+      allow create, update: if true; // In a production app, we'd restrict this to a service account or specific backend trigger
+    }
+
+    // Products: Publicly readable by the agent. Writable only by admin.
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Knowledge Sources: Only admin can manage.
+    match /knowledge_sources/{sourceId} {
+      allow read, write: if isAdmin();
+    }
+
+    // User profiles for RBAC
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow write: if isAdmin();
+    }
+  }
+}

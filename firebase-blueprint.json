@@ -1,0 +1,69 @@
+{
+  "entities": {
+    "Session": {
+      "title": "Session",
+      "description": "A record of a voice conversation session with a client.",
+      "type": "object",
+      "properties": {
+        "startTime": { "type": "string", "format": "date-time" },
+        "endTime": { "type": "string", "format": "date-time" },
+        "callerId": { "type": "string", "description": "Identifier for the caller (e.g., phone number or browser session ID)" },
+        "preferredLanguage": { "type": "string" },
+        "transcript": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": { "type": "string", "enum": ["AI", "Customer"] },
+              "text": { "type": "string" },
+              "timestamp": { "type": "string", "format": "date-time" }
+            }
+          }
+        },
+        "summary": { "type": "string" },
+        "outcome": { "type": "string", "enum": ["inquiry", "support", "sale", "lead", "other"] }
+      },
+      "required": ["startTime", "callerId"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "An item in the product catalog.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "price": { "type": "number" },
+        "category": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "price"]
+    },
+    "KnowledgeSource": {
+      "title": "Knowledge Source",
+      "description": "A link or article used to populate the product catalog.",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["url", "article"] },
+        "content": { "type": "string", "description": "The URL or the text of the article" },
+        "status": { "type": "string", "enum": ["pending", "processed", "failed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["type", "content", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/sessions/{sessionId}": {
+      "schema": "Session",
+      "description": "Collection of all voice sessions."
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "The product catalog."
+    },
+    "/knowledge_sources/{sourceId}": {
+      "schema": "KnowledgeSource",
+      "description": "Sources used to update the catalog."
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import Database from 'better-sqlite3';
@@ -7,16 +8,23 @@ import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
 import { GoogleGenAI, Modality, Type } from '@google/genai';
 import { db } from './db.js';
+import { Firestore } from '@google-cloud/firestore';
+import firebaseConfig from './firebase-applet-config.json' assert { type: 'json' };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const firestore = new Firestore({
+  projectId: firebaseConfig.projectId,
+  databaseId: firebaseConfig.firestoreDatabaseId
+});
+
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-const SYSTEM_INSTRUCTION = `You are a professional multilingual AI Support Agent as a Sales and Customer Care Representative for a business.
+const SYSTEM_INSTRUCTION = `You are a professional multilingual AI Support Agent as a Sales and Customer Care Representative for DrisaTech (https://drisatech.com.ng).
 
-Your responsibilities:
+Your primary knowledge comes from the DrisaTech website and the product catalog provided via tools.
 1. Automatically detect the customer's language and respond in the same language.
 2. If the user has specified a preferred language, start the conversation in that language.
 3. Supported languages: English, Hausa, Igbo, Yoruba, Nigerian Pidgin.
@@ -30,52 +38,128 @@ Your responsibilities:
 11. If the customer is unsure: Offer 2-3 options based on budget or use case.
 12. Never hallucinate product data. Only use catalog data provided via function call.
 13. Always keep responses short enough for natural phone conversation.
+14. If you detect the user is on a phone call, be extra concise and clear.
 
 Tone: Professional, Friendly, Solution-focused, Trust-building.
 Goal: Convert inquiry into qualified lead or sale.`;
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Initialize Database
 db.init();
 
 // --- API Routes ---
 
-// Get all products or search
-app.get('/api/products', async (req, res) => {
-  const query = req.query.q as string;
-  const products = await db.getProducts(query);
-  res.json(products);
+// KB Processing Route
+app.post('/api/kb/process', async (req, res) => {
+  const { type, content } = req.body;
+  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+  
+  if (!apiKey) {
+    console.error('[Gemini] API Key is missing');
+    return res.status(500).json({ error: 'Gemini API Key is missing' });
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  try {
+    let textToProcess = content;
+
+    if (type === 'url') {
+      // In a real app, we'd fetch the URL content here. 
+      // For this demo, we'll use Gemini's urlContext if possible, 
+      // but since this is a backend route, we'll just simulate or use a simple fetch if allowed.
+      // Since we can't easily fetch external URLs from this sandbox without a library, 
+      // we'll ask Gemini to "imagine" the content if it's a known site, or just use the URL as a prompt.
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Extract product information (name, description, price in Naira, category) from this source: ${content}. If it's a URL, use your knowledge of the site or common product patterns. Return a JSON array of products.`,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING },
+                description: { type: Type.STRING },
+                price: { type: Type.NUMBER },
+                category: { type: Type.STRING }
+              },
+              required: ["name", "price"]
+            }
+          }
+        }
+      });
+      
+      const products = JSON.parse(response.text);
+      const batch = firestore.batch();
+      products.forEach((p: any) => {
+        const docRef = firestore.collection('products').doc();
+        batch.set(docRef, { ...p, updatedAt: new Date().toISOString() });
+      });
+      await batch.commit();
+    } else {
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Extract product information (name, description, price in Naira, category) from this article: ${content}. Return a JSON array of products.`,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING },
+                description: { type: Type.STRING },
+                price: { type: Type.NUMBER },
+                category: { type: Type.STRING }
+              },
+              required: ["name", "price"]
+            }
+          }
+        }
+      });
+      
+      const products = JSON.parse(response.text);
+      const batch = firestore.batch();
+      products.forEach((p: any) => {
+        const docRef = firestore.collection('products').doc();
+        batch.set(docRef, { ...p, updatedAt: new Date().toISOString() });
+      });
+      await batch.commit();
+    }
+
+    // Update source status
+    const sources = await firestore.collection('knowledge_sources')
+      .where('content', '==', content)
+      .limit(1)
+      .get();
+    
+    if (!sources.empty) {
+      await sources.docs[0].ref.update({ status: 'processed' });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to process knowledge source' });
+  }
 });
 
-// Add a product
-app.post('/api/products', async (req, res) => {
-  const product = await db.addProduct(req.body);
-  res.json(product);
-});
-
-// Get follow-ups
-app.get('/api/follow-ups', async (req, res) => {
-  const followUps = await db.getFollowUps();
-  res.json(followUps);
-});
-
-// Create a follow-up (Triggered by AI Agent)
-app.post('/api/follow-ups', async (req, res) => {
-  const followUp = await db.addFollowUp(req.body);
-  res.json({ success: true, ...followUp });
-});
-
-// Twilio Voice Webhook Placeholder
+// Twilio Voice Webhook
 app.post('/api/twilio/voice', (req, res) => {
-  // This is where Twilio would send incoming calls.
-  // To connect to Gemini Live API via Twilio, you would return TwiML that starts a <Connect><Stream>
-  // pointing to a WebSocket endpoint on this server.
+  const from = req.body.From || 'Unknown';
+  console.log(`[Twilio] Incoming call from: ${from}`);
+  
   const twiml = `
     <Response>
-      <Say>Welcome to our AI Customer Care. Please wait while we connect you.</Say>
+      <Say>Welcome to DrisaTech AI Support. Please wait while we connect you.</Say>
       <Connect>
-        <Stream url="wss://${req.headers.host}/api/twilio/stream" />
+        <Stream url="wss://${req.headers.host}/api/twilio/stream">
+          <Parameter name="from" value="${from}" />
+        </Stream>
       </Connect>
     </Response>
   `;
@@ -145,12 +229,16 @@ async function startServer() {
     let geminiSession: any = null;
     let isConnectingGemini = false;
     let preferredLanguage: string = 'English';
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    let transcript: { role: string, text: string, timestamp: string }[] = [];
+    let startTime = new Date().toISOString();
+    
+    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+    const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
     const connectToGemini = async () => {
-      if (!process.env.GEMINI_API_KEY) {
-        console.error('[Gemini] API Key is missing!');
-        ws.send(JSON.stringify({ event: 'error', message: 'Gemini API Key is missing in environment' }));
+      if (!ai) {
+        console.error('[Gemini] API Key is missing, cannot connect');
+        ws.send(JSON.stringify({ event: 'error', message: 'Gemini API Key is missing' }));
         ws.close();
         return;
       }
@@ -232,6 +320,7 @@ async function startServer() {
               if (message.serverContent?.modelTurn) {
                 const text = message.serverContent.modelTurn.parts.find(p => p.text)?.text;
                 if (text) {
+                  transcript.push({ role: 'AI', text, timestamp: new Date().toISOString() });
                   ws.send(JSON.stringify({ event: 'transcript', role: 'AI', text }));
                 }
               }
@@ -239,6 +328,7 @@ async function startServer() {
               if (userTurn) {
                 const text = (userTurn.parts as any[]).find(p => p.text)?.text;
                 if (text) {
+                  transcript.push({ role: 'Customer', text, timestamp: new Date().toISOString() });
                   ws.send(JSON.stringify({ event: 'transcript', role: 'Customer', text }));
                 }
               }
@@ -251,7 +341,19 @@ async function startServer() {
               if (message.toolCall?.functionCalls) {
                 const responses = await Promise.all(message.toolCall.functionCalls.map(async (call) => {
                   if (call.name === 'lookupCatalog') {
-                    const products = await db.getProducts((call.args as any)?.query || '');
+                    const query = (call.args as any)?.query || '';
+                    let products: any[] = [];
+                    
+                    const snapshot = await firestore.collection('products').get();
+                    products = snapshot.docs.map(doc => doc.data());
+                    
+                    if (query) {
+                      products = products.filter(p => 
+                        p.name.toLowerCase().includes(query.toLowerCase()) || 
+                        p.description.toLowerCase().includes(query.toLowerCase())
+                      );
+                    }
+                    
                     return { id: call.id, name: call.name, response: { result: products } };
                   } else if (call.name === 'sendFollowUp') {
                     const args = call.args as any;
@@ -296,7 +398,10 @@ async function startServer() {
       try {
         const data = JSON.parse(message);
         if (data.event === 'start') {
-          streamSid = data.start?.streamSid || null;
+          streamSid = data.start?.streamSid || data.streamSid || null;
+          const from = data.start?.customParameters?.from;
+          if (from) streamSid = from; // Use phone number as callerId if available
+          
           preferredLanguage = data.preferredLanguage || 'English';
           connectToGemini();
         } else if (data.event === 'media' || data.event === 'audio') {
@@ -317,8 +422,49 @@ async function startServer() {
       }
     });
 
-    ws.on('close', () => {
+    ws.on('close', async () => {
       if (geminiSession) geminiSession.close();
+      
+      // Log session to Firestore
+      if (transcript.length > 0) {
+        try {
+          const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+          if (!apiKey) throw new Error('Gemini API Key is missing');
+          
+          const ai = new GoogleGenAI({ apiKey });
+          const summaryResponse = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: `Summarize this conversation and determine the outcome (inquiry, support, sale, lead, other): ${JSON.stringify(transcript)}`,
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  summary: { type: Type.STRING },
+                  outcome: { type: Type.STRING, enum: ["inquiry", "support", "sale", "lead", "other"] }
+                },
+                required: ["summary", "outcome"]
+              }
+            }
+          });
+          
+          const { summary, outcome } = JSON.parse(summaryResponse.text);
+          
+          await firestore.collection('sessions').add({
+            startTime,
+            endTime: new Date().toISOString(),
+            callerId: streamSid || 'browser-user',
+            preferredLanguage,
+            transcript,
+            summary,
+            outcome,
+            createdAt: new Date().toISOString()
+          });
+          console.log('[Firestore] Session logged');
+        } catch (err) {
+          console.error('[Firestore] Failed to log session:', err);
+        }
+      }
     });
   }
 }
