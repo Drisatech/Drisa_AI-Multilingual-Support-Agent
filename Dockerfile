@@ -22,9 +22,5 @@ ENV NODE_ENV=production
 # Expose the port Cloud Run will use (Google Cloud defaults to 8080)
 EXPOSE 8080
 
-# Healthcheck to ensure the container is ready
-HEALTHCHECK --interval=30s --timeout=3s \
-  CMD curl -f http://localhost:8080/api/health || exit 1
-
 # Start the application using the start script defined in package.json
 CMD ["npm", "start"]

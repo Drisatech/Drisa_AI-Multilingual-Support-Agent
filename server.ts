@@ -224,14 +224,22 @@ app.post('/api/twilio/voice', (req, res) => {
 
 // --- Vite Middleware for Development ---
 async function startServer() {
-  // Initialize Database
-  try {
-    console.log('[Startup] Initializing database...');
-    await db.init();
+  // Start listening IMMEDIATELY to satisfy Cloud Run health checks
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[Startup] Server is listening on port ${PORT}`);
+    console.log(`[Startup] Health check: http://localhost:${PORT}/api/health`);
+  });
+
+  server.on('error', (err) => {
+    console.error('[Startup] Server error:', err);
+  });
+
+  // Initialize Database in background
+  db.init().then(() => {
     console.log('[Startup] Database initialized');
-  } catch (err) {
+  }).catch((err) => {
     console.error('[Startup] Database initialization failed:', err);
-  }
+  });
 
   if (process.env.NODE_ENV !== 'production') {
     try {
@@ -256,15 +264,6 @@ async function startServer() {
       }
     });
   }
-
-  const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Startup] Server is listening on port ${PORT}`);
-    console.log(`[Startup] Health check: http://localhost:${PORT}/api/health`);
-  });
-
-  server.on('error', (err) => {
-    console.error('[Startup] Server error:', err);
-  });
 
   // --- WebSocket Server for Twilio Streams ---
   const twilioWss = new WebSocketServer({ noServer: true });
