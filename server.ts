@@ -49,7 +49,7 @@ Your primary knowledge comes from the DrisaTech website and the product catalog 
 11. If the customer is unsure: Offer 2-3 options based on budget or use case.
 12. Never hallucinate product data. Only use catalog data provided via function call.
 13. Always keep responses short enough for natural phone conversation.
-14. If you detect the user is on a phone call, be extra concise and clear.
+14. If you detect the user is on a phone call, be extra concise and clear. Speak at a moderate, steady pace.
 
 Tone: Professional, Friendly, Solution-focused, Trust-building.
 Goal: Convert inquiry into qualified lead or sale.`;
@@ -82,18 +82,22 @@ function pcm24ToMulaw8(base64Payload: string): string {
       return pcm24ToMulaw8(Buffer.from(buffer.slice(0, -1)).toString('base64'));
     }
     
+    // Convert to Int16Array safely to avoid byteOffset issues
+    // Also apply a slight gain reduction to prevent clipping in mu-law
+    const samples16 = new Int16Array(buffer.length / 2);
+    for (let i = 0; i < samples16.length; i++) {
+      // 70% gain is safer for telephony to avoid "cracking" (clipping)
+      samples16[i] = Math.floor(buffer.readInt16LE(i * 2) * 0.7);
+    }
+    
     const wav = new WaveFile();
-    // Gemini output is 24kHz 16-bit Mono PCM (Little Endian)
-    // Using Int16Array is safer for 16-bit PCM data
-    const samples16 = new Int16Array(buffer.buffer, buffer.byteOffset, buffer.length / 2);
+    // Gemini output is 24kHz 16-bit Mono PCM
     wav.fromScratch(1, 24000, '16', samples16);
     wav.toSampleRate(8000);
     wav.toBitDepth('8m');
     const samples = wav.getSamples(false, Uint8Array);
     
-    const output = Buffer.from(samples).toString('base64');
-    // console.log(`[Audio] pcm24ToMulaw8: in=${buffer.length}b, out=${output.length}b`);
-    return output;
+    return Buffer.from(samples).toString('base64');
   } catch (e) {
     console.error('[Audio] pcm24ToMulaw8 failed:', e);
     return '';
@@ -353,6 +357,7 @@ async function startServer() {
     let preferredLanguage: string = 'English';
     let transcript: { role: string, text: string, timestamp: string }[] = [];
     let startTime = new Date().toISOString();
+    let audioOutputBuffer = Buffer.alloc(0);
     
     const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
     const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
@@ -381,7 +386,7 @@ async function startServer() {
           config: {
             responseModalities: [Modality.AUDIO],
             speechConfig: {
-              voiceConfig: { prebuiltVoiceConfig: { voiceName: "Zephyr" } },
+              voiceConfig: { prebuiltVoiceConfig: { voiceName: "Puck" } },
             },
             systemInstruction: SYSTEM_INSTRUCTION,
             inputAudioTranscription: {},
@@ -444,7 +449,19 @@ async function startServer() {
                   if (part.inlineData && part.inlineData.mimeType.includes('audio')) {
                     const base64Audio = part.inlineData.data;
                     if (base64Audio && ws.readyState === WebSocket.OPEN && streamSid) {
-                      ws.send(createMessage(base64Audio, streamSid));
+                      const mulawBase64 = pcm24ToMulaw8(base64Audio);
+                      if (mulawBase64) {
+                        const mulawBuffer = Buffer.from(mulawBase64, 'base64');
+                        audioOutputBuffer = Buffer.concat([audioOutputBuffer, mulawBuffer]);
+                        
+                        // Twilio prefers 20ms chunks (160 bytes of mu-law)
+                        // Sending tiny packets causes "cracking" noise
+                        while (audioOutputBuffer.length >= 160) {
+                          const chunk = audioOutputBuffer.slice(0, 160);
+                          audioOutputBuffer = audioOutputBuffer.slice(160);
+                          ws.send(createMessage(chunk.toString('base64'), streamSid));
+                        }
+                      }
                     } else if (base64Audio && !streamSid) {
                       console.warn('[Gemini] Audio received but streamSid is still null, dropping chunk');
                     }
