@@ -69,7 +69,7 @@ https://drisa-ai-agent-448742322230.us-central1.run.app
 
 ---
 
-# Vision
+## Vision
 
 The long-term vision of the **Drisa_AI Agent** is to evolve into a scalable **AI Voice Agent platform for SMEs**, enabling businesses to deploy intelligent virtual assistants that can:
 
@@ -83,7 +83,7 @@ This system is designed to support businesses across Africa where voice communic
 
 ---
 
-# Potential SaaS Platform
+## Potential SaaS Platform
 
 Future versions of this project aim to support:
 
