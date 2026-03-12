@@ -9,7 +9,10 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { GoogleGenAI, Modality, Type } from '@google/genai';
 import { db } from './db.js';
 import { Firestore } from '@google-cloud/firestore';
-import firebaseConfig from './firebase-applet-config.json' assert { type: 'json' };
+const firebaseConfig = {
+  projectId: process.env.VITE_FIREBASE_PROJECT_ID,
+  firestoreDatabaseId: process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID
+};
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
