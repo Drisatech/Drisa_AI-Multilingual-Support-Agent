@@ -63,13 +63,15 @@ function mulawToPcm16(base64Payload: string): string {
     const buffer = Buffer.from(base64Payload, 'base64');
     const wav = new WaveFile();
     wav.fromScratch(1, 8000, '8m', buffer);
-    wav.toSampleRate(16000);
+    // Decompress mu-law to 16-bit PCM first, then change sample rate
     wav.toBitDepth('16');
+    wav.toSampleRate(16000);
     const samples = wav.getSamples(false, Int16Array);
-    return Buffer.from(samples.buffer).toString('base64');
+    // console.log(`[Audio] mulawToPcm16 success, samples: ${samples.length}`);
+    return Buffer.from(samples.buffer, samples.byteOffset, samples.byteLength).toString('base64');
   } catch (e) {
     console.error('[Audio] mulawToPcm16 failed:', e);
-    return base64Payload;
+    return ''; // Return empty instead of raw mu-law to avoid confusing Gemini
   }
 }
 
@@ -77,15 +79,15 @@ function pcm24ToMulaw8(base64Payload: string): string {
   try {
     const buffer = Buffer.from(base64Payload, 'base64');
     const wav = new WaveFile();
-    // Assuming Gemini output is 24kHz 16-bit Mono PCM
+    // Gemini output is 24kHz 16-bit Mono PCM
     wav.fromScratch(1, 24000, '16', buffer);
     wav.toSampleRate(8000);
     wav.toBitDepth('8m');
     const samples = wav.getSamples(false, Uint8Array);
-    return Buffer.from(samples.buffer).toString('base64');
+    return Buffer.from(samples.buffer, samples.byteOffset, samples.byteLength).toString('base64');
   } catch (e) {
     console.error('[Audio] pcm24ToMulaw8 failed:', e);
-    return base64Payload;
+    return '';
   }
 }
 
@@ -531,7 +533,14 @@ async function startServer() {
           }
           
           if (geminiSession && payload) {
+            // console.log(`[Gemini] Sending audio chunk, size: ${payload.length}`);
             geminiSession.sendRealtimeInput({ media: { data: payload, mimeType } });
+          } else if (!geminiSession && !isConnectingGemini && streamSid) {
+            // This case handles if media arrives before 'start' event or if 'start' was missed
+            console.log('[Twilio] Connecting to Gemini on first media packet');
+            connectToGemini().then(() => {
+              if (geminiSession && payload) geminiSession.sendRealtimeInput({ media: { data: payload, mimeType } });
+            });
           } else if (!geminiSession && !isConnectingGemini && !streamSid && data.event === 'audio') {
             // For browser, we might not have a 'start' event, so connect on first audio
             console.log('[Browser] Connecting to Gemini on first audio packet');
