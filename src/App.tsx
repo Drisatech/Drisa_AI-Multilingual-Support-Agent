@@ -6,6 +6,7 @@ import { Mic, MicOff, Phone, PhoneOff, Package, MessageSquare, Settings, Activit
 export default function App() {
   const [activeTab, setActiveTab] = useState<'agent' | 'catalog' | 'followups'>('agent');
   const [darkMode, setDarkMode] = useState(false);
+  const [preferredLanguage, setPreferredLanguage] = useState('English');
   const [products, setProducts] = useState<Product[]>([]);
   const [followUps, setFollowUps] = useState<FollowUp[]>([]);
   
@@ -112,15 +113,35 @@ export default function App() {
                 <h3 className={`text-xl font-medium mb-2 ${darkMode ? 'text-white' : 'text-zinc-900'}`}>
                   {isConnected ? 'Agent is listening...' : 'Ready to connect'}
                 </h3>
+                
+                {!isConnected && !isConnecting && (
+                  <div className="mb-6 max-w-xs mx-auto">
+                    <label className={`block text-xs font-semibold uppercase tracking-wider mb-2 ${darkMode ? 'text-white/40' : 'text-zinc-500'}`}>
+                      Preferred Language
+                    </label>
+                    <select 
+                      value={preferredLanguage}
+                      onChange={(e) => setPreferredLanguage(e.target.value)}
+                      className={`w-full px-4 py-2 rounded-xl border transition-colors ${darkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-zinc-50 border-zinc-200 text-zinc-900'}`}
+                    >
+                      <option>English</option>
+                      <option>Hausa</option>
+                      <option>Igbo</option>
+                      <option>Yoruba</option>
+                      <option>Nigerian Pidgin</option>
+                    </select>
+                  </div>
+                )}
+
                 <p className={`max-w-md mx-auto ${darkMode ? 'text-white/60' : 'text-zinc-500'}`}>
                   {isConnected 
-                    ? 'Speak naturally in English, Hausa, Igbo, Yoruba, or Pidgin. The agent will respond in the same language.' 
-                    : 'Click connect to start a voice conversation with the AI support agent.'}
+                    ? `Speaking in ${preferredLanguage}. The agent will automatically detect if you switch languages.` 
+                    : 'Select your preferred language and click connect to start a voice conversation.'}
                 </p>
               </div>
 
               <button
-                onClick={isConnected ? disconnect : connect}
+                onClick={isConnected ? disconnect : () => connect(preferredLanguage)}
                 disabled={isConnecting}
                 className={`flex items-center gap-2 px-8 py-4 rounded-full font-medium text-lg transition-all shadow-sm ${
                   isConnected 

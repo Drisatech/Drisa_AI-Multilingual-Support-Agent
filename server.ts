@@ -18,16 +18,18 @@ const SYSTEM_INSTRUCTION = `You are a professional multilingual AI Support Agent
 
 Your responsibilities:
 1. Automatically detect the customer's language and respond in the same language.
-Supported languages: English, Hausa, Igbo, Yoruba, Nigerian Pidgin.
-2. Be polite, professional, warm, and helpful.
-3. Understand whether the customer is: Making an inquiry, Requesting support, Asking for price, Asking for recommendation, or Asking for recent products.
-4. When customer describes a need: Ask clarifying questions if necessary, Suggest suitable products from the catalog, Mention benefits, pricing, and availability.
-5. During the conversation: Offer to send product details via WhatsApp or Email. Ask customer to provide preferred contact and confirm it clearly. Once confirmed, ALWAYS call the 'sendFollowUp' tool immediately to send the details.
-6. After calling the tool: Summarize what was sent, Thank the customer, End conversation professionally.
-7. When suggesting products: Use persuasive but honest sales tone. Focus on solving customer's problem.
-8. If the customer is unsure: Offer 2-3 options based on budget or use case.
-9. Never hallucinate product data. Only use catalog data provided via function call.
-10. Always keep responses short enough for natural phone conversation.
+2. If the user has specified a preferred language, start the conversation in that language.
+3. Supported languages: English, Hausa, Igbo, Yoruba, Nigerian Pidgin.
+4. You have built-in translation capabilities. If a customer asks you to translate something or speak in another language, do so seamlessly.
+5. Be polite, professional, warm, and helpful.
+6. Understand whether the customer is: Making an inquiry, Requesting support, Asking for price, Asking for recommendation, or Asking for recent products.
+7. When customer describes a need: Ask clarifying questions if necessary, Suggest suitable products from the catalog, Mention benefits, pricing, and availability.
+8. During the conversation: Offer to send product details via WhatsApp or Email. Ask customer to provide preferred contact and confirm it clearly. Once confirmed, ALWAYS call the 'sendFollowUp' tool immediately to send the details.
+9. After calling the tool: Summarize what was sent, Thank the customer, End conversation professionally.
+10. When suggesting products: Use persuasive but honest sales tone. Focus on solving customer's problem.
+11. If the customer is unsure: Offer 2-3 options based on budget or use case.
+12. Never hallucinate product data. Only use catalog data provided via function call.
+13. Always keep responses short enough for natural phone conversation.
 
 Tone: Professional, Friendly, Solution-focused, Trust-building.
 Goal: Convert inquiry into qualified lead or sale.`;
@@ -141,12 +143,24 @@ async function startServer() {
   async function setupGeminiProxy(ws: WebSocket, mimeType: string, getPayload: (data: any) => string, createMessage: (payload: string, streamSid?: string) => string) {
     let streamSid: string | null = null;
     let geminiSession: any = null;
+    let isConnectingGemini = false;
+    let preferredLanguage: string = 'English';
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
     const connectToGemini = async () => {
+      if (!process.env.GEMINI_API_KEY) {
+        console.error('[Gemini] API Key is missing!');
+        ws.send(JSON.stringify({ event: 'error', message: 'Gemini API Key is missing in environment' }));
+        ws.close();
+        return;
+      }
+      if (isConnectingGemini || geminiSession) return;
+      isConnectingGemini = true;
+      
       try {
+        console.log('[Gemini] Connecting to Live API with model gemini-2.5-flash-native-audio-preview-12-2025...');
         const sessionPromise = ai.live.connect({
-          model: "gemini-2.5-flash-native-audio-preview-09-2025",
+          model: "gemini-2.5-flash-native-audio-preview-12-2025",
           config: {
             responseModalities: [Modality.AUDIO],
             speechConfig: {
@@ -196,10 +210,7 @@ async function startServer() {
           callbacks: {
             onopen: () => {
               console.log('[Gemini] Connected');
-              // Send initial greeting prompt
-              sessionPromise.then(s => {
-                (s as any).sendRealtimeInput([{ text: "Welcome to Drisa_AI Agent, how can I help you today?" }]);
-              });
+              // Initial greeting will be handled by the model naturally or upon first user input
             },
             onmessage: async (message) => {
               // Handle transcriptions
@@ -248,14 +259,21 @@ async function startServer() {
                 sessionPromise.then(s => s.sendToolResponse({ functionResponses: responses }));
               }
             },
-            onerror: (err) => { console.error('[Gemini] Error:', err); ws.close(); },
+            onerror: (err) => { 
+              console.error('[Gemini] Error:', err); 
+              ws.send(JSON.stringify({ event: 'error', message: 'Gemini connection error' }));
+              ws.close(); 
+            },
             onclose: () => { console.log('[Gemini] Closed'); ws.close(); }
           }
         });
         geminiSession = await sessionPromise;
       } catch (err) {
         console.error('[Gemini] Connection failed:', err);
+        ws.send(JSON.stringify({ event: 'error', message: 'Failed to connect to Gemini' }));
         ws.close();
+      } finally {
+        isConnectingGemini = false;
       }
     };
 
@@ -264,6 +282,7 @@ async function startServer() {
         const data = JSON.parse(message);
         if (data.event === 'start') {
           streamSid = data.start?.streamSid || null;
+          preferredLanguage = data.preferredLanguage || 'English';
           connectToGemini();
         } else if (data.event === 'media' || data.event === 'audio') {
           const payload = getPayload(data);

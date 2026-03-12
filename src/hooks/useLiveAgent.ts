@@ -57,7 +57,7 @@ export function useLiveAgent() {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const streamerRef = useRef<AudioStreamer | null>(null);
 
-  const connect = async () => {
+  const connect = async (preferredLanguage: string = 'English') => {
     try {
       setIsConnecting(true);
       setError(null);
@@ -74,8 +74,8 @@ export function useLiveAgent() {
         setIsConnected(true);
         setIsConnecting(false);
         
-        // Trigger connection on backend
-        ws.send(JSON.stringify({ event: 'start' }));
+        // Trigger connection on backend with preferred language
+        ws.send(JSON.stringify({ event: 'start', preferredLanguage }));
         
         // Setup microphone
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -119,12 +119,15 @@ export function useLiveAgent() {
           streamerRef.current.addPCM16(data.audio);
         } else if (data.event === 'transcript') {
           setTranscript(prev => [...prev, { role: data.role, text: data.text }]);
+        } else if (data.event === 'error') {
+          console.error("Server Error:", data.message);
+          setError(data.message);
         }
       };
 
       ws.onerror = (err) => {
         console.error("WebSocket Error:", err);
-        setError("Connection error. Please try again.");
+        setError("WebSocket connection failed. Check console for details.");
         disconnect();
       };
 
