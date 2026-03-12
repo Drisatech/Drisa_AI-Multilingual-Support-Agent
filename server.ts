@@ -78,13 +78,22 @@ function mulawToPcm16(base64Payload: string): string {
 function pcm24ToMulaw8(base64Payload: string): string {
   try {
     const buffer = Buffer.from(base64Payload, 'base64');
+    if (buffer.length % 2 !== 0) {
+      return pcm24ToMulaw8(Buffer.from(buffer.slice(0, -1)).toString('base64'));
+    }
+    
     const wav = new WaveFile();
-    // Gemini output is 24kHz 16-bit Mono PCM
-    wav.fromScratch(1, 24000, '16', buffer);
+    // Gemini output is 24kHz 16-bit Mono PCM (Little Endian)
+    // Using Int16Array is safer for 16-bit PCM data
+    const samples16 = new Int16Array(buffer.buffer, buffer.byteOffset, buffer.length / 2);
+    wav.fromScratch(1, 24000, '16', samples16);
     wav.toSampleRate(8000);
     wav.toBitDepth('8m');
     const samples = wav.getSamples(false, Uint8Array);
-    return Buffer.from(samples.buffer, samples.byteOffset, samples.byteLength).toString('base64');
+    
+    const output = Buffer.from(samples).toString('base64');
+    // console.log(`[Audio] pcm24ToMulaw8: in=${buffer.length}b, out=${output.length}b`);
+    return output;
   } catch (e) {
     console.error('[Audio] pcm24ToMulaw8 failed:', e);
     return '';
@@ -422,15 +431,27 @@ async function startServer() {
               console.log('[Gemini] Connected');
             },
             onmessage: async (message) => {
-              console.log('[Gemini] Message received:', JSON.stringify(message).substring(0, 200) + '...');
-              // Handle transcriptions
+              // console.log('[Gemini] Message received:', JSON.stringify(message).substring(0, 200) + '...');
+              
+              // Handle transcriptions and audio
               if (message.serverContent?.modelTurn) {
-                const text = message.serverContent.modelTurn.parts.find(p => p.text)?.text;
-                if (text) {
-                  transcript.push({ role: 'AI', text, timestamp: new Date().toISOString() });
-                  ws.send(JSON.stringify({ event: 'transcript', role: 'AI', text }));
+                for (const part of message.serverContent.modelTurn.parts) {
+                  if (part.text) {
+                    const text = part.text;
+                    transcript.push({ role: 'AI', text, timestamp: new Date().toISOString() });
+                    ws.send(JSON.stringify({ event: 'transcript', role: 'AI', text }));
+                  }
+                  if (part.inlineData && part.inlineData.mimeType.includes('audio')) {
+                    const base64Audio = part.inlineData.data;
+                    if (base64Audio && ws.readyState === WebSocket.OPEN && streamSid) {
+                      ws.send(createMessage(base64Audio, streamSid));
+                    } else if (base64Audio && !streamSid) {
+                      console.warn('[Gemini] Audio received but streamSid is still null, dropping chunk');
+                    }
+                  }
                 }
               }
+
               const userTurn = (message.serverContent as any)?.userTurn;
               if (userTurn) {
                 const text = (userTurn.parts as any[]).find(p => p.text)?.text;
@@ -438,11 +459,6 @@ async function startServer() {
                   transcript.push({ role: 'Customer', text, timestamp: new Date().toISOString() });
                   ws.send(JSON.stringify({ event: 'transcript', role: 'Customer', text }));
                 }
-              }
-
-              const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
-              if (base64Audio && ws.readyState === WebSocket.OPEN) {
-                ws.send(createMessage(base64Audio, streamSid || undefined));
               }
 
               if (message.toolCall?.functionCalls) {
@@ -503,6 +519,12 @@ async function startServer() {
           }
         });
         geminiSession = await sessionPromise;
+        
+        // Send initial greeting trigger
+        if (streamSid) {
+          console.log('[Gemini] Sending initial greeting trigger');
+          geminiSession.sendRealtimeInput([{ text: "Hello! Please introduce yourself briefly as the DrisaTech AI Support Agent and ask how you can help." }]);
+        }
       } catch (err) {
         console.error('[Gemini] Connection failed:', err);
         ws.send(JSON.stringify({ event: 'error', message: 'Failed to connect to Gemini' }));
