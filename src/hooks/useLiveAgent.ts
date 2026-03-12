@@ -131,7 +131,10 @@ export function useLiveAgent() {
         disconnect();
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
+        if (!event.wasClean && isConnected) {
+          setError("The connection was lost unexpectedly. Please try reconnecting.");
+        }
         disconnect();
       };
       
@@ -167,12 +170,20 @@ export function useLiveAgent() {
     setIsConnecting(false);
   };
 
+  const sendMessage = (text: string) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ event: 'message', text }));
+      setTranscript(prev => [...prev, { role: 'user', text }]);
+    }
+  };
+
   return {
     isConnected,
     isConnecting,
     transcript,
     error,
     connect,
-    disconnect
+    disconnect,
+    sendMessage
   };
 }

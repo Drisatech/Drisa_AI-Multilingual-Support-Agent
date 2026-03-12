@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Product, FollowUp } from './types';
 import { useLiveAgent } from './hooks/useLiveAgent';
-import { Mic, MicOff, Phone, PhoneOff, Package, MessageSquare, Settings, Activity, Sun, Moon, BookOpen, LogIn, LogOut, Globe, FileText, Plus, Trash2 } from 'lucide-react';
+import { Mic, MicOff, Phone, PhoneOff, Package, MessageSquare, Settings, Activity, Sun, Moon, BookOpen, LogIn, LogOut, Globe, FileText, Plus, Trash2, Send } from 'lucide-react';
 import { auth, signInWithGoogle, db as fdb } from './firebase';
 import { onAuthStateChanged, User, signOut } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, doc, deleteDoc, updateDoc } from 'firebase/firestore';
@@ -13,6 +13,7 @@ export default function App() {
   const [preferredLanguage, setPreferredLanguage] = useState('English');
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [messageInput, setMessageInput] = useState('');
   
   // Sessions State
   const [sessions, setSessions] = useState<any[]>([]);
@@ -23,7 +24,36 @@ export default function App() {
   const [newSourceArticle, setNewSourceArticle] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const { isConnected, isConnecting, error, connect, disconnect } = useLiveAgent();
+  const { isConnected, isConnecting, error, connect, disconnect, sendMessage } = useLiveAgent();
+  const [callDuration, setCallDuration] = useState(0);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isConnected) {
+      setCallDuration(0);
+      interval = setInterval(() => {
+        setCallDuration(prev => prev + 1);
+      }, 1000);
+    } else {
+      setCallDuration(0);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isConnected]);
+
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const handleSendMessage = () => {
+    if (messageInput.trim() && isConnected) {
+      sendMessage(messageInput);
+      setMessageInput('');
+    }
+  };
 
   useEffect(() => {
     // Check for widget mode
@@ -92,19 +122,6 @@ export default function App() {
     }
   };
 
-  const handleLogin = async () => {
-    try {
-      await signInWithGoogle();
-    } catch (err: any) {
-      console.error("Login failed:", err);
-      if (err.code === 'auth/popup-blocked') {
-        alert("Login popup was blocked. Please allow popups for this site or open the app in a new tab.");
-      } else {
-        alert(`Login failed: ${err.message}`);
-      }
-    }
-  };
-
   return (
     <div className={`min-h-screen flex flex-col md:flex-row font-sans transition-colors duration-300 ${darkMode ? 'bg-brand-secondary text-white' : 'bg-zinc-50 text-zinc-900'}`}>
       {/* Sidebar - Hidden in widget mode */}
@@ -157,25 +174,16 @@ export default function App() {
 
           <div className="p-4 border-t border-white/10">
             {user ? (
-              <div className="space-y-3">
-                <div className="px-4 py-2 bg-white/5 rounded-lg">
-                  <p className="text-[10px] uppercase tracking-wider text-white/40 font-bold mb-1">Logged in as</p>
-                  <p className="text-xs text-white/80 truncate">{user.email}</p>
-                  <p className={`text-[10px] mt-1 font-bold ${isAdmin ? 'text-green-400' : 'text-amber-400'}`}>
-                    {isAdmin ? 'ADMIN ACCESS' : 'STANDARD USER'}
-                  </p>
-                </div>
-                <button 
-                  onClick={() => signOut(auth)}
-                  className="w-full flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-white/10 transition-colors text-white/70 text-sm"
-                >
-                  <LogOut className="w-4 h-4" />
-                  Sign Out
-                </button>
-              </div>
+              <button 
+                onClick={() => signOut(auth)}
+                className="w-full flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-white/10 transition-colors text-white/70 text-sm"
+              >
+                <LogOut className="w-4 h-4" />
+                Sign Out
+              </button>
             ) : (
               <button 
-                onClick={handleLogin}
+                onClick={signInWithGoogle}
                 className="w-full flex items-center gap-3 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors text-white text-sm"
               >
                 <LogIn className="w-4 h-4" />
@@ -238,15 +246,36 @@ export default function App() {
               </div>
 
               {error && (
-                <div className="mb-6 px-4 py-3 bg-red-50 text-red-600 rounded-xl text-sm text-center">
-                  {error}
+                <div className={`mb-6 px-6 py-4 rounded-2xl text-sm text-center flex flex-col items-center gap-2 border transition-colors ${darkMode ? 'bg-red-500/10 border-red-500/20 text-red-400' : 'bg-red-50 border-red-100 text-red-600'}`}>
+                  <Activity className="w-5 h-5 opacity-50" />
+                  <p className="font-medium">{error}</p>
+                  {!isConnected && !isConnecting && (
+                    <button 
+                      onClick={() => connect(preferredLanguage)}
+                      className={`mt-1 text-xs font-bold uppercase tracking-wider underline hover:no-underline ${darkMode ? 'text-red-400' : 'text-red-600'}`}
+                    >
+                      Try Reconnecting Now
+                    </button>
+                  )}
                 </div>
               )}
 
               <div className="text-center mb-8">
                 <h3 className={`text-xl font-medium mb-2 ${darkMode ? 'text-white' : 'text-zinc-900'}`}>
-                  {isConnected ? 'Agent is listening...' : 'Ready to connect'}
+                  {isConnected ? 'Agent is listening...' : error ? 'Connection Lost' : 'Ready to connect'}
                 </h3>
+                
+                {isConnected && (
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-red-500/10 text-red-500 text-[10px] font-bold uppercase tracking-wider animate-pulse border border-red-500/20">
+                      <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
+                      Live
+                    </div>
+                    <div className={`text-sm font-mono px-3 py-1 rounded-full border ${darkMode ? 'bg-white/5 border-white/10 text-brand-light' : 'bg-zinc-50 border-zinc-200 text-brand-secondary'}`}>
+                      {formatDuration(callDuration)}
+                    </div>
+                  </div>
+                )}
                 
                 {!isConnected && !isConnecting && (
                   <div className="mb-6 max-w-xs mx-auto">
@@ -287,6 +316,8 @@ export default function App() {
                   <><PhoneOff className="w-5 h-5" /> End Call</>
                 ) : isConnecting ? (
                   <><Activity className="w-5 h-5 animate-spin" /> Connecting...</>
+                ) : error ? (
+                  <><Phone className="w-5 h-5" /> Reconnect Agent</>
                 ) : (
                   <><Phone className="w-5 h-5" /> Connect Agent</>
                 )}
@@ -295,6 +326,31 @@ export default function App() {
               <div className={`mt-4 text-sm font-medium animate-pulse ${darkMode ? 'text-white/40' : 'text-zinc-400'}`}>
                 Call Us Here For Free
               </div>
+
+              {isConnected && (
+                <div className="mt-10 w-full max-w-md">
+                  <div className={`flex items-center gap-2 p-2 rounded-2xl border transition-colors ${darkMode ? 'bg-white/5 border-white/10' : 'bg-zinc-50 border-zinc-200'}`}>
+                    <input 
+                      type="text" 
+                      placeholder="Type a message (e.g. Email or WhatsApp)..."
+                      value={messageInput}
+                      onChange={(e) => setMessageInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                      className={`flex-1 bg-transparent px-3 py-2 text-sm outline-none ${darkMode ? 'text-white placeholder:text-white/30' : 'text-zinc-900 placeholder:text-zinc-400'}`}
+                    />
+                    <button 
+                      onClick={handleSendMessage}
+                      disabled={!messageInput.trim()}
+                      className={`p-2 rounded-xl transition-all ${messageInput.trim() ? (darkMode ? 'bg-brand-primary text-white shadow-lg shadow-brand-primary/20' : 'bg-brand-secondary text-white shadow-lg shadow-brand-secondary/20') : 'text-zinc-400 cursor-not-allowed'}`}
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <p className={`text-[10px] mt-2 text-center uppercase tracking-widest font-bold ${darkMode ? 'text-white/20' : 'text-zinc-300'}`}>
+                    Send contact info or details to the agent
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}
