@@ -9,6 +9,9 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { GoogleGenAI, Modality, Type } from '@google/genai';
 import { db } from './db.js';
 import { Firestore } from '@google-cloud/firestore';
+import alawmulaw from 'alawmulaw';
+import { resample } from 'wave-resampler';
+
 const firebaseConfig = {
   projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'MISSING_PROJECT_ID',
   firestoreDatabaseId: process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || '(default)'
@@ -256,7 +259,37 @@ async function startServer() {
   // Twilio Stream Handler (Mu-law 8000Hz)
   twilioWss.on('connection', (ws: WebSocket) => {
     console.log('[Twilio] New stream connection');
-    setupGeminiProxy(ws, 'audio/x-mulaw;rate=8000', (data) => data.media.payload, (payload, streamSid) => JSON.stringify({ event: 'media', streamSid, media: { payload } }));
+    
+    // Transcoding functions for Twilio
+    const decodeTwilio = (payload: string) => {
+      const buffer = Buffer.from(payload, 'base64');
+      const pcm8k = alawmulaw.mulaw.decode(buffer); // Int16Array 8kHz
+      const pcm16k = resample(pcm8k, 8000, 16000); // Float64Array or similar
+      
+      // Convert to Int16 for Gemini
+      const int16 = new Int16Array(pcm16k.length);
+      for (let i = 0; i < pcm16k.length; i++) int16[i] = Math.max(-32768, Math.min(32767, pcm16k[i]));
+      return Buffer.from(int16.buffer).toString('base64');
+    };
+
+    const encodeTwilio = (base64PCM: string) => {
+      const buffer = Buffer.from(base64PCM, 'base64');
+      const pcm24k = new Int16Array(buffer.buffer, buffer.byteOffset, buffer.length / 2);
+      const pcm8k = resample(pcm24k, 24000, 8000);
+      
+      const int16 = new Int16Array(pcm8k.length);
+      for (let i = 0; i < pcm8k.length; i++) int16[i] = Math.max(-32768, Math.min(32767, pcm8k[i]));
+      
+      const mulawBuffer = alawmulaw.mulaw.encode(int16);
+      return Buffer.from(mulawBuffer).toString('base64');
+    };
+
+    setupGeminiProxy(
+      ws, 
+      'audio/pcm;rate=16000', 
+      (data) => decodeTwilio(data.media.payload), 
+      (payload, streamSid) => JSON.stringify({ event: 'media', streamSid, media: { payload: encodeTwilio(payload) } })
+    );
   });
 
   // Browser Stream Handler (PCM 16000Hz)

@@ -92,6 +92,19 @@ export default function App() {
     }
   };
 
+  const handleLogin = async () => {
+    try {
+      await signInWithGoogle();
+    } catch (err: any) {
+      console.error("Login failed:", err);
+      if (err.code === 'auth/popup-blocked') {
+        alert("Login popup was blocked. Please allow popups for this site or open the app in a new tab.");
+      } else {
+        alert(`Login failed: ${err.message}`);
+      }
+    }
+  };
+
   return (
     <div className={`min-h-screen flex flex-col md:flex-row font-sans transition-colors duration-300 ${darkMode ? 'bg-brand-secondary text-white' : 'bg-zinc-50 text-zinc-900'}`}>
       {/* Sidebar - Hidden in widget mode */}
@@ -144,16 +157,25 @@ export default function App() {
 
           <div className="p-4 border-t border-white/10">
             {user ? (
-              <button 
-                onClick={() => signOut(auth)}
-                className="w-full flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-white/10 transition-colors text-white/70 text-sm"
-              >
-                <LogOut className="w-4 h-4" />
-                Sign Out
-              </button>
+              <div className="space-y-3">
+                <div className="px-4 py-2 bg-white/5 rounded-lg">
+                  <p className="text-[10px] uppercase tracking-wider text-white/40 font-bold mb-1">Logged in as</p>
+                  <p className="text-xs text-white/80 truncate">{user.email}</p>
+                  <p className={`text-[10px] mt-1 font-bold ${isAdmin ? 'text-green-400' : 'text-amber-400'}`}>
+                    {isAdmin ? 'ADMIN ACCESS' : 'STANDARD USER'}
+                  </p>
+                </div>
+                <button 
+                  onClick={() => signOut(auth)}
+                  className="w-full flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-white/10 transition-colors text-white/70 text-sm"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Sign Out
+                </button>
+              </div>
             ) : (
               <button 
-                onClick={signInWithGoogle}
+                onClick={handleLogin}
                 className="w-full flex items-center gap-3 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors text-white text-sm"
               >
                 <LogIn className="w-4 h-4" />
