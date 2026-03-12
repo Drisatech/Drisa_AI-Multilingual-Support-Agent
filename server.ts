@@ -1,13 +1,20 @@
 import 'dotenv/config';
+
+process.on('uncaughtException', (err) => {
+  console.error('[Fatal] Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Fatal] Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
-import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
 import { GoogleGenAI, Modality, Type } from '@google/genai';
-import { db } from './db.js';
+import { db } from './db';
 import { Firestore } from '@google-cloud/firestore';
 import alawmulaw from 'alawmulaw';
 import { resample } from 'wave-resampler';
@@ -66,7 +73,13 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Initialize Database
-db.init();
+try {
+  console.log('[Startup] Initializing database...');
+  await db.init();
+  console.log('[Startup] Database initialized');
+} catch (err) {
+  console.error('[Startup] Database initialization failed:', err);
+}
 
 // Health Check
 app.get('/api/health', (req, res) => {
@@ -218,11 +231,16 @@ app.post('/api/twilio/voice', (req, res) => {
 // --- Vite Middleware for Development ---
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
+    try {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } catch (err) {
+      console.error('[Startup] Failed to load Vite:', err);
+    }
   } else {
     const distPath = path.join(__dirname, 'dist');
     app.use(express.static(distPath));
@@ -238,6 +256,10 @@ async function startServer() {
 
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Startup] Server is listening on http://0.0.0.0:${PORT}`);
+  });
+
+  server.on('error', (err) => {
+    console.error('[Startup] Server error:', err);
   });
 
   // --- WebSocket Server for Twilio Streams ---
