@@ -32,21 +32,21 @@ export default function App() {
       setIsWidgetMode(true);
     }
 
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
+    const unsubscribe = auth ? onAuthStateChanged(auth, (u) => {
       setUser(u);
       setIsAdmin(u?.email === 'drisatech@gmail.com');
-    });
+    }) : () => {};
     return () => unsubscribe();
   }, []);
 
   useEffect(() => {
-    if (isAdmin && activeTab === 'kb') {
+    if (isAdmin && activeTab === 'kb' && fdb) {
       const q = query(collection(fdb, 'knowledge_sources'), orderBy('createdAt', 'desc'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
         setKbSources(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       });
       return () => unsubscribe();
-    } else if (isAdmin && activeTab === 'sessions') {
+    } else if (isAdmin && activeTab === 'sessions' && fdb) {
       const q = query(collection(fdb, 'sessions'), orderBy('createdAt', 'desc'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
         setSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
@@ -56,7 +56,7 @@ export default function App() {
   }, [isAdmin, activeTab]);
 
   const handleAddSource = async (type: 'url' | 'article') => {
-    if (!isAdmin) return;
+    if (!isAdmin || !fdb) return;
     setIsProcessing(true);
     try {
       const content = type === 'url' ? newSourceUrl : newSourceArticle;
@@ -166,6 +166,15 @@ export default function App() {
 
       {/* Main Content */}
       <main className={`flex-1 overflow-y-auto ${isWidgetMode ? 'p-4' : 'p-6 md:p-10'}`}>
+        {(!fdb || !auth) && (
+          <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center gap-3 text-amber-500 text-sm">
+            <Activity className="w-5 h-5" />
+            <div>
+              <p className="font-bold">Firebase Not Configured</p>
+              <p className="opacity-80">Please set your VITE_FIREBASE_* environment variables in Cloud Run to enable Knowledge Base and Sessions.</p>
+            </div>
+          </div>
+        )}
         {isWidgetMode && (
           <div className="flex justify-end mb-4">
              <button 

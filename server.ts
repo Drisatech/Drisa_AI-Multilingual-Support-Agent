@@ -10,17 +10,23 @@ import { GoogleGenAI, Modality, Type } from '@google/genai';
 import { db } from './db.js';
 import { Firestore } from '@google-cloud/firestore';
 const firebaseConfig = {
-  projectId: process.env.VITE_FIREBASE_PROJECT_ID,
-  firestoreDatabaseId: process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID
+  projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'MISSING_PROJECT_ID',
+  firestoreDatabaseId: process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || '(default)'
 };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const firestore = new Firestore({
-  projectId: firebaseConfig.projectId,
-  databaseId: firebaseConfig.firestoreDatabaseId
-});
+let firestore: Firestore;
+try {
+  firestore = new Firestore({
+    projectId: firebaseConfig.projectId,
+    databaseId: firebaseConfig.firestoreDatabaseId
+  });
+} catch (e) {
+  console.error("Firestore initialization failed:", e);
+  firestore = null as any;
+}
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -52,7 +58,28 @@ app.use(express.urlencoded({ extended: true }));
 // Initialize Database
 db.init();
 
-// --- API Routes ---
+// Health Check
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    env: process.env.NODE_ENV,
+    firebase: !!process.env.VITE_FIREBASE_PROJECT_ID,
+    gemini: !!(process.env.GEMINI_API_KEY || process.env.API_KEY)
+  });
+});
+
+// Config Route for Frontend
+app.get('/api/config', (req, res) => {
+  res.json({
+    apiKey: process.env.VITE_FIREBASE_API_KEY,
+    authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.VITE_FIREBASE_PROJECT_ID,
+    appId: process.env.VITE_FIREBASE_APP_ID,
+    firestoreDatabaseId: process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID,
+    storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  });
+});
 
 // KB Processing Route
 app.post('/api/kb/process', async (req, res) => {
@@ -155,12 +182,18 @@ app.post('/api/kb/process', async (req, res) => {
 app.post('/api/twilio/voice', (req, res) => {
   const from = req.body.From || 'Unknown';
   console.log(`[Twilio] Incoming call from: ${from}`);
+  console.log(`[Twilio] Headers:`, JSON.stringify(req.headers));
+  
+  // Use APP_URL if set, otherwise fallback to host header
+  const host = process.env.APP_URL ? new URL(process.env.APP_URL).host : req.headers.host;
+  const streamUrl = `wss://${host}/api/twilio/stream`;
+  console.log(`[Twilio] Stream URL: ${streamUrl}`);
   
   const twiml = `
     <Response>
       <Say>Welcome to DrisaTech AI Support. Please wait while we connect you.</Say>
       <Connect>
-        <Stream url="wss://${req.headers.host}/api/twilio/stream">
+        <Stream url="${streamUrl}">
           <Parameter name="from" value="${from}" />
         </Stream>
       </Connect>
@@ -200,17 +233,22 @@ async function startServer() {
   const browserWss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (request, socket, head) => {
-    const pathname = new URL(request.url!, `http://${request.headers.host}`).pathname;
-
+    const url = new URL(request.url!, `http://${request.headers.host}`);
+    const pathname = url.pathname;
+    console.log(`[Upgrade] Request for ${pathname}`);
+    
     if (pathname === '/api/twilio/stream') {
+      console.log('[Upgrade] Handling Twilio stream upgrade');
       twilioWss.handleUpgrade(request, socket, head, (ws) => {
         twilioWss.emit('connection', ws, request);
       });
     } else if (pathname === '/api/browser/stream') {
+      console.log('[Upgrade] Handling Browser stream upgrade');
       browserWss.handleUpgrade(request, socket, head, (ws) => {
         browserWss.emit('connection', ws, request);
       });
     } else {
+      console.log(`[Upgrade] Path ${pathname} not found, destroying socket`);
       socket.destroy();
     }
   });
