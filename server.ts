@@ -75,11 +75,11 @@ function mulawToPcm16(base64Payload: string): string {
   }
 }
 
-function pcm24ToMulaw8(base64Payload: string): string {
+function pcmToMulaw(base64Payload: string): string {
   try {
     const buffer = Buffer.from(base64Payload, 'base64');
     if (buffer.length % 2 !== 0) {
-      return pcm24ToMulaw8(Buffer.from(buffer.slice(0, -1)).toString('base64'));
+      return pcmToMulaw(Buffer.from(buffer.slice(0, -1)).toString('base64'));
     }
     
     const samples16 = new Int16Array(buffer.length / 2);
@@ -96,7 +96,7 @@ function pcm24ToMulaw8(base64Payload: string): string {
     
     return Buffer.from(samples).toString('base64');
   } catch (e) {
-    console.error('[Audio] pcm24ToMulaw8 failed:', e);
+    console.error('[Audio] pcmToMulaw failed:', e);
     return '';
   }
 }
@@ -337,7 +337,7 @@ async function startServer() {
       ws, 
       'audio/pcm;rate=16000', 
       (data) => mulawToPcm16(data.media.payload), 
-      (payload, streamSid) => JSON.stringify({ event: 'media', streamSid, media: { payload: pcm24ToMulaw8(payload) } })
+      (payload, streamSid) => JSON.stringify({ event: 'media', streamSid, media: { payload: pcmToMulaw(payload) } })
     );
   });
 
@@ -435,6 +435,11 @@ async function startServer() {
             onmessage: async (message) => {
               // console.log('[Gemini] Message received:', JSON.stringify(message).substring(0, 200) + '...');
               
+              if (message.serverContent?.interrupted) {
+                console.log('[Gemini] Model interrupted');
+                ws.send(JSON.stringify({ event: 'interrupted' }));
+              }
+
               // Handle transcriptions and audio
               if (message.serverContent?.modelTurn) {
                 for (const part of message.serverContent.modelTurn.parts) {
@@ -445,13 +450,9 @@ async function startServer() {
                   }
                   if (part.inlineData && part.inlineData.mimeType.includes('audio')) {
                     const base64Audio = part.inlineData.data;
-                    if (base64Audio && ws.readyState === WebSocket.OPEN && streamSid) {
-                      const mulawBase64 = pcm24ToMulaw8(base64Audio);
-                      if (mulawBase64) {
-                        ws.send(createMessage(mulawBase64, streamSid));
-                      }
-                    } else if (base64Audio && !streamSid) {
-                      console.warn('[Gemini] Audio received but streamSid is still null, dropping chunk');
+                    if (base64Audio && ws.readyState === WebSocket.OPEN) {
+                      // console.log(`[Gemini] Sending audio chunk to ${streamSid ? 'Twilio' : 'Browser'}`);
+                      ws.send(createMessage(base64Audio, streamSid || undefined));
                     }
                   }
                 }
@@ -526,9 +527,10 @@ async function startServer() {
         geminiSession = await sessionPromise;
         
         // Send initial greeting trigger
-        if (streamSid) {
-          console.log('[Gemini] Sending initial greeting trigger');
-          geminiSession.sendRealtimeInput([{ text: "Hello! Please introduce yourself briefly as the DrisaTech AI Support Agent and ask how you can help." }]);
+        if (geminiSession) {
+          console.log(`[Gemini] Sending initial greeting trigger in ${preferredLanguage}`);
+          const greetingPrompt = `Hello! Please introduce yourself briefly in ${preferredLanguage} as the DrisaTech AI Support Agent and ask how you can help.`;
+          geminiSession.sendRealtimeInput({ parts: [{ text: greetingPrompt }] });
         }
       } catch (err) {
         console.error('[Gemini] Connection failed:', err);

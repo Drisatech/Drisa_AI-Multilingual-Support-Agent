@@ -9,10 +9,14 @@ class AudioStreamer {
     this.nextStartTime = this.audioContext.currentTime;
   }
 
-  async addPCM16(base64Audio: string) {
+  async resume() {
     if (this.audioContext.state === 'suspended') {
       await this.audioContext.resume();
     }
+  }
+
+  async addPCM16(base64Audio: string) {
+    await this.resume();
     const binaryString = window.atob(base64Audio);
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
@@ -64,6 +68,7 @@ export function useLiveAgent() {
       setTranscript([]);
 
       streamerRef.current = new AudioStreamer();
+      await streamerRef.current.resume();
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${protocol}//${window.location.host}/api/browser/stream`;
