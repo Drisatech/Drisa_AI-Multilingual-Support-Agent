@@ -99,7 +99,7 @@ export default function App() {
       const content = type === 'url' ? newSourceUrl : newSourceArticle;
       if (!content) return;
 
-      await addDoc(collection(fdb, 'knowledge_sources'), {
+      const docRef = await addDoc(collection(fdb, 'knowledge_sources'), {
         type,
         content,
         status: 'pending',
@@ -111,7 +111,7 @@ export default function App() {
       const response = await fetch('/api/kb/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, content })
+        body: JSON.stringify({ type, content, id: docRef.id })
       });
       
       if (!response.ok) {
@@ -188,13 +188,19 @@ export default function App() {
 
           <div className="p-4 border-t border-white/10">
             {user ? (
-              <button 
-                onClick={() => signOut(auth)}
-                className="w-full flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-white/10 transition-colors text-white/70 text-sm"
-              >
-                <LogOut className="w-4 h-4" />
-                Sign Out
-              </button>
+              <div className="space-y-2">
+                <div className="px-4 py-2 text-xs text-white/50 truncate">
+                  Logged in as: <span className="text-white/80">{user.email}</span>
+                  {!isAdmin && <div className="text-amber-400 mt-1">Not an admin</div>}
+                </div>
+                <button 
+                  onClick={() => signOut(auth)}
+                  className="w-full flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-white/10 transition-colors text-white/70 text-sm"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Sign Out
+                </button>
+              </div>
             ) : (
               <button 
                 onClick={signInWithGoogle}
@@ -445,6 +451,27 @@ export default function App() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
+                    {source.status === 'pending' && (
+                      <button 
+                        onClick={async () => {
+                          setIsProcessing(true);
+                          try {
+                            await fetch('/api/kb/process', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ type: source.type, content: source.content, id: source.id })
+                            });
+                          } catch (e) {
+                            console.error(e);
+                          } finally {
+                            setIsProcessing(false);
+                          }
+                        }}
+                        className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-brand-primary text-brand-primary hover:bg-brand-primary hover:text-white transition-colors"
+                      >
+                        Retry Process
+                      </button>
+                    )}
                     <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${
                       source.status === 'processed' ? 'border-emerald-500/50 text-emerald-500 bg-emerald-500/10' : 
                       source.status === 'failed' ? 'border-red-500/50 text-red-500 bg-red-500/10' : 
@@ -544,6 +571,11 @@ export default function App() {
                     <div>
                       <div className="flex items-center gap-3 mb-1">
                         <span className={`text-sm font-bold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>{session.sessionId}</span>
+                        {session.clientIp && (
+                          <span className="text-[10px] font-mono text-zinc-400 bg-zinc-100 dark:bg-white/5 px-1.5 py-0.5 rounded">
+                            IP: {session.clientIp}
+                          </span>
+                        )}
                         <span className={`text-xs px-2 py-0.5 rounded-full ${
                           session.outcome === 'sale' ? 'bg-emerald-500/10 text-emerald-500' :
                           session.outcome === 'lead' ? 'bg-blue-500/10 text-blue-500' :

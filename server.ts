@@ -127,7 +127,7 @@ app.get('/api/config', (req, res) => {
 
 // KB Processing Route
 app.post('/api/kb/process', async (req, res) => {
-  const { type, content } = req.body;
+  const { type, content, id } = req.body;
   const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
   
   if (!apiKey) {
@@ -138,81 +138,47 @@ app.post('/api/kb/process', async (req, res) => {
   const ai = new GoogleGenAI({ apiKey });
 
   try {
-    let textToProcess = content;
-
-    if (type === 'url') {
-      // In a real app, we'd fetch the URL content here. 
-      // For this demo, we'll use Gemini's urlContext if possible, 
-      // but since this is a backend route, we'll just simulate or use a simple fetch if allowed.
-      // Since we can't easily fetch external URLs from this sandbox without a library, 
-      // we'll ask Gemini to "imagine" the content if it's a known site, or just use the URL as a prompt.
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Extract product information (name, description, price in Naira, category) from this source: ${content}. If it's a URL, use your knowledge of the site or common product patterns. Return a JSON array of products.`,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING },
-                description: { type: Type.STRING },
-                price: { type: Type.NUMBER },
-                category: { type: Type.STRING }
-              },
-              required: ["name", "price"]
-            }
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: `Extract product information (name, description, price in Naira, category) from this ${type === 'url' ? 'website URL' : 'article'}: ${content}. Return a JSON array of products.`,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              name: { type: Type.STRING },
+              description: { type: Type.STRING },
+              price: { type: Type.NUMBER },
+              category: { type: Type.STRING }
+            },
+            required: ["name", "price"]
           }
         }
-      });
-      
-      const products = JSON.parse(response.text);
-      const batch = firestore.batch();
-      products.forEach((p: any) => {
-        const docRef = firestore.collection('products').doc();
-        batch.set(docRef, { ...p, updatedAt: new Date().toISOString() });
-      });
-      await batch.commit();
-    } else {
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Extract product information (name, description, price in Naira, category) from this article: ${content}. Return a JSON array of products.`,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING },
-                description: { type: Type.STRING },
-                price: { type: Type.NUMBER },
-                category: { type: Type.STRING }
-              },
-              required: ["name", "price"]
-            }
-          }
-        }
-      });
-      
-      const products = JSON.parse(response.text);
-      const batch = firestore.batch();
-      products.forEach((p: any) => {
-        const docRef = firestore.collection('products').doc();
-        batch.set(docRef, { ...p, updatedAt: new Date().toISOString() });
-      });
-      await batch.commit();
-    }
+      }
+    });
+    
+    const products = JSON.parse(response.text);
+    const batch = firestore.batch();
+    products.forEach((p: any) => {
+      const docRef = firestore.collection('products').doc();
+      batch.set(docRef, { ...p, updatedAt: new Date().toISOString() });
+    });
+    await batch.commit();
 
     // Update source status
-    const sources = await firestore.collection('knowledge_sources')
-      .where('content', '==', content)
-      .limit(1)
-      .get();
-    
-    if (!sources.empty) {
-      await sources.docs[0].ref.update({ status: 'processed' });
+    if (id) {
+      await firestore.collection('knowledge_sources').doc(id).update({ status: 'processed' });
+    } else {
+      const sources = await firestore.collection('knowledge_sources')
+        .where('content', '==', content)
+        .limit(1)
+        .get();
+      
+      if (!sources.empty) {
+        await sources.docs[0].ref.update({ status: 'processed' });
+      }
     }
 
     res.json({ success: true });
@@ -306,16 +272,20 @@ async function startServer() {
       const host = request.headers.host || 'localhost';
       const url = new URL(request.url!, `http://${host}`);
       const pathname = url.pathname;
-      console.log(`[Upgrade] Request for ${pathname}`);
+      const ip = (request.headers['x-forwarded-for'] as string || request.socket.remoteAddress || 'unknown').split(',')[0].trim();
+      
+      console.log(`[Upgrade] Request for ${pathname} from ${ip}`);
       
       if (pathname.startsWith('/api/twilio/stream')) {
         console.log('[Upgrade] Handling Twilio stream upgrade');
         twilioWss.handleUpgrade(request, socket, head, (ws) => {
+          (ws as any).clientIp = ip;
           twilioWss.emit('connection', ws, request);
         });
       } else if (pathname.startsWith('/api/browser/stream')) {
         console.log('[Upgrade] Handling Browser stream upgrade');
         browserWss.handleUpgrade(request, socket, head, (ws) => {
+          (ws as any).clientIp = ip;
           browserWss.emit('connection', ws, request);
         });
       } else {
@@ -330,22 +300,25 @@ async function startServer() {
 
   // Twilio Stream Handler (Mu-law 8000Hz)
   twilioWss.on('connection', (ws: WebSocket) => {
-    console.log('[Twilio] New stream connection');
+    const clientIp = (ws as any).clientIp || 'unknown';
+    console.log(`[Twilio] New stream connection from ${clientIp}`);
     setupGeminiProxy(
       ws, 
       'audio/pcm;rate=16000', 
       (data) => mulawToPcm16(data.media.payload), 
-      (payload, streamSid) => JSON.stringify({ event: 'media', streamSid, media: { payload: pcmToMulaw(payload) } })
+      (payload, streamSid) => JSON.stringify({ event: 'media', streamSid, media: { payload: pcmToMulaw(payload) } }),
+      clientIp
     );
   });
 
   // Browser Stream Handler (PCM 16000Hz)
   browserWss.on('connection', (ws: WebSocket) => {
-    console.log('[Browser] New stream connection');
-    setupGeminiProxy(ws, 'audio/pcm;rate=16000', (data) => data.audio, (payload) => JSON.stringify({ event: 'audio', audio: payload }));
+    const clientIp = (ws as any).clientIp || 'unknown';
+    console.log(`[Browser] New stream connection from ${clientIp}`);
+    setupGeminiProxy(ws, 'audio/pcm;rate=16000', (data) => data.audio, (payload) => JSON.stringify({ event: 'audio', audio: payload }), clientIp);
   });
 
-  async function setupGeminiProxy(ws: WebSocket, mimeType: string, getPayload: (data: any) => string, createMessage: (payload: string, streamSid?: string) => string) {
+  async function setupGeminiProxy(ws: WebSocket, mimeType: string, getPayload: (data: any) => string, createMessage: (payload: string, streamSid?: string) => string, clientIp: string) {
     let streamSid: string | null = null;
     let geminiSession: any = null;
     let isConnectingGemini = false;
@@ -633,13 +606,14 @@ async function startServer() {
           const { summary, outcome } = JSON.parse(summaryResponse.text);
           
           await firestore.collection('conversations').add({
-            sessionId: streamSid || 'browser-user-' + Date.now(),
+            sessionId: streamSid || `browser-${clientIp}-${Date.now()}`,
             startTime,
             endTime: new Date().toISOString(),
             language: preferredLanguage,
             transcript,
             summary,
             outcome,
+            clientIp,
             createdAt: new Date().toISOString()
           });
           console.log('[Firestore] Session logged');
