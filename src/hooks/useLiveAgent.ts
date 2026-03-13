@@ -92,7 +92,7 @@ export function useLiveAgent() {
         audioContextRef.current = audioContext;
         
         const source = audioContext.createMediaStreamSource(stream);
-        const processor = audioContext.createScriptProcessor(4096, 1, 1);
+        const processor = audioContext.createScriptProcessor(2048, 1, 1);
         processorRef.current = processor;
         
         source.connect(processor);
