@@ -11,10 +11,7 @@ import { db } from './db.js';
 import { Firestore } from '@google-cloud/firestore';
 import pkg from 'wavefile';
 const { WaveFile } = pkg;
-const firebaseConfig = {
-  projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'MISSING_PROJECT_ID',
-  firestoreDatabaseId: process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || '(default)'
-};
+import firebaseConfig from './firebase-applet-config.json' assert { type: 'json' };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -505,8 +502,23 @@ async function startServer() {
                       return { id: call.id, name: call.name, response: { error: "Missing required arguments: contactType, contactAddress, or message" } };
                     }
 
-                    const followUp = await db.addFollowUp({ contactType, contactAddress, message: msg });
-                    return { id: call.id, name: call.name, response: { result: "Follow-up sent successfully via " + contactType, id: followUp.id } };
+                    if (firestore) {
+                      try {
+                        await firestore.collection('leads').add({
+                          contactType,
+                          phone: contactType === 'whatsapp' ? contactAddress : '',
+                          email: contactType === 'email' ? contactAddress : '',
+                          notes: msg,
+                          createdAt: new Date().toISOString(),
+                          status: 'new'
+                        });
+                        console.log(`[Firestore] Lead saved: ${contactAddress}`);
+                      } catch (e) {
+                        console.error('[Firestore] Failed to save lead:', e);
+                      }
+                    }
+                    
+                    return { id: call.id, name: call.name, response: { result: "Follow-up sent successfully via " + contactType } };
                   }
                   return { id: call.id, name: call.name, response: { error: "Unknown function" } };
                 }));
@@ -620,11 +632,11 @@ async function startServer() {
           
           const { summary, outcome } = JSON.parse(summaryResponse.text);
           
-          await firestore.collection('sessions').add({
+          await firestore.collection('conversations').add({
+            sessionId: streamSid || 'browser-user-' + Date.now(),
             startTime,
             endTime: new Date().toISOString(),
-            callerId: streamSid || 'browser-user',
-            preferredLanguage,
+            language: preferredLanguage,
             transcript,
             summary,
             outcome,

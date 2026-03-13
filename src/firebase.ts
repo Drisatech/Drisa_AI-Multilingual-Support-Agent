@@ -1,44 +1,35 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'MISSING_API_KEY',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'MISSING_PROJECT_ID',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
-  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || '(default)',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
-};
+import { getFirestore, collection, addDoc, serverTimestamp, query, orderBy, onSnapshot, doc, getDocFromServer } from 'firebase/firestore';
+import firebaseConfig from '../firebase-applet-config.json';
 
-let app;
-try {
-  app = initializeApp(firebaseConfig);
-} catch (e) {
-  console.error("Firebase initialization failed. Check your environment variables.", e);
-  // Create a dummy app or handle gracefully
-  app = { name: '[DEFAULT]' } as any; 
-}
-
-let db: any;
-let auth: any;
-
-try {
-  db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-  auth = getAuth(app);
-} catch (e) {
-  console.error("Firebase services initialization failed:", e);
-  db = null;
-  auth = null;
-}
-
-export { db, auth };
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
-export const signInWithGoogle = () => {
-  if (!auth) {
-    alert("Firebase is not configured. Please set your environment variables.");
-    return;
+// Auth helper
+export const signInWithGoogle = async () => {
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+    return result.user;
+  } catch (error) {
+    console.error("Error signing in with Google", error);
+    throw error;
   }
-  return signInWithPopup(auth, googleProvider);
 };
+
+// Connection test
+async function testConnection() {
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.error("Please check your Firebase configuration. The client is offline.");
+    }
+  }
+}
+testConnection();
+
+export { collection, addDoc, serverTimestamp, query, orderBy, onSnapshot, doc };

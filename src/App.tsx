@@ -7,7 +7,7 @@ import { onAuthStateChanged, User, signOut } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'agent' | 'kb' | 'sessions'>('agent');
+  const [activeTab, setActiveTab] = useState<'agent' | 'kb' | 'sessions' | 'leads'>('agent');
   const [darkMode, setDarkMode] = useState(false);
   const [isWidgetMode, setIsWidgetMode] = useState(false);
   const [preferredLanguage, setPreferredLanguage] = useState('English');
@@ -17,6 +17,7 @@ export default function App() {
   
   // Sessions State
   const [sessions, setSessions] = useState<any[]>([]);
+  const [leads, setLeads] = useState<any[]>([]);
   
   // Knowledge Base State
   const [kbSources, setKbSources] = useState<any[]>([]);
@@ -77,9 +78,15 @@ export default function App() {
       });
       return () => unsubscribe();
     } else if (isAdmin && activeTab === 'sessions' && fdb) {
-      const q = query(collection(fdb, 'sessions'), orderBy('createdAt', 'desc'));
+      const q = query(collection(fdb, 'conversations'), orderBy('createdAt', 'desc'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
         setSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      });
+      return () => unsubscribe();
+    } else if (isAdmin && activeTab === 'leads' && fdb) {
+      const q = query(collection(fdb, 'leads'), orderBy('createdAt', 'desc'));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        setLeads(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       });
       return () => unsubscribe();
     }
@@ -167,6 +174,13 @@ export default function App() {
                 >
                   <Activity className="w-5 h-5" />
                   Call Sessions
+                </button>
+                <button 
+                  onClick={() => setActiveTab('leads')}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'leads' ? (darkMode ? 'bg-brand-primary text-white' : 'bg-brand-secondary text-white') : 'hover:bg-white/10'}`}
+                >
+                  <Package className="w-5 h-5" />
+                  Leads & Follow-ups
                 </button>
               </>
             )}
@@ -444,6 +458,78 @@ export default function App() {
             </div>
           </div>
         )}
+        {activeTab === 'leads' && isAdmin && (
+          <div className="max-w-5xl mx-auto">
+            <div className="mb-8 flex justify-between items-end">
+              <div>
+                <h2 className={`text-3xl font-semibold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>Leads & Follow-ups</h2>
+                <p className={`${darkMode ? 'text-white/60' : 'text-zinc-500'} mt-2`}>Potential customers captured by the AI agent.</p>
+              </div>
+              <div className={`text-xs font-bold uppercase tracking-widest ${darkMode ? 'text-white/40' : 'text-zinc-400'}`}>
+                Total Leads: {leads.length}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4">
+              {leads.map(lead => (
+                <div key={lead.id} className={`p-6 rounded-2xl border flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors duration-300 ${darkMode ? 'bg-brand-secondary border-white/10' : 'bg-white border-zinc-200'}`}>
+                  <div className="flex items-center gap-4">
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center ${darkMode ? 'bg-white/5' : 'bg-zinc-50'}`}>
+                      {lead.contactType === 'whatsapp' ? <MessageSquare className="w-6 h-6 text-emerald-500" /> : <Send className="w-6 h-6 text-blue-500" />}
+                    </div>
+                    <div>
+                      <div className={`font-bold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>{lead.phone || lead.email}</div>
+                      <div className="text-xs text-zinc-400 uppercase tracking-wider mt-0.5">
+                        {lead.contactType} • {new Date(lead.createdAt).toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="flex-1 max-w-md">
+                    <p className={`text-sm italic ${darkMode ? 'text-white/60' : 'text-zinc-500'}`}>"{lead.notes}"</p>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <select 
+                      value={lead.status || 'new'}
+                      onChange={async (e) => {
+                        if (fdb) {
+                          await updateDoc(doc(fdb, 'leads', lead.id), { status: e.target.value });
+                        }
+                      }}
+                      className={`text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg border outline-none transition-colors ${
+                        lead.status === 'closed' ? 'border-emerald-500/50 text-emerald-500 bg-emerald-500/10' : 
+                        lead.status === 'contacted' ? 'border-blue-500/50 text-blue-500 bg-blue-500/10' : 
+                        'border-amber-500/50 text-amber-500 bg-amber-500/10'
+                      }`}
+                    >
+                      <option value="new">New</option>
+                      <option value="contacted">Contacted</option>
+                      <option value="closed">Closed</option>
+                    </select>
+                    <button 
+                      onClick={async () => {
+                        if (fdb && confirm('Are you sure you want to delete this lead?')) {
+                          await deleteDoc(doc(fdb, 'leads', lead.id));
+                        }
+                      }}
+                      className={`p-2 rounded-lg hover:bg-red-500/10 text-zinc-400 hover:text-red-500 transition-colors`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {leads.length === 0 && (
+                <div className="text-center py-12 text-zinc-400 bg-white/5 rounded-3xl border border-dashed border-zinc-200">
+                  <Package className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                  <p>No leads captured yet. The AI will save them here when customers provide contact info.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {activeTab === 'sessions' && isAdmin && (
           <div className="max-w-5xl mx-auto">
             <div className="mb-8">
@@ -457,7 +543,7 @@ export default function App() {
                   <div className="flex justify-between items-start mb-4">
                     <div>
                       <div className="flex items-center gap-3 mb-1">
-                        <span className={`text-sm font-bold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>{session.callerId}</span>
+                        <span className={`text-sm font-bold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>{session.sessionId}</span>
                         <span className={`text-xs px-2 py-0.5 rounded-full ${
                           session.outcome === 'sale' ? 'bg-emerald-500/10 text-emerald-500' :
                           session.outcome === 'lead' ? 'bg-blue-500/10 text-blue-500' :
@@ -467,7 +553,7 @@ export default function App() {
                         </span>
                       </div>
                       <div className="text-xs text-zinc-400">
-                        {new Date(session.startTime).toLocaleString()} • {session.preferredLanguage}
+                        {new Date(session.startTime).toLocaleString()} • {session.language}
                       </div>
                     </div>
                   </div>
