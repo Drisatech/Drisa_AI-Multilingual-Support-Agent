@@ -1,6 +1,24 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: leads
+    // Fields: contactType, phone, email, notes, createdAt, status
+    //
+    // Collection: conversations
+    // Fields: sessionId, startTime, endTime, language, transcript, summary, outcome, clientIp, createdAt
+    //
+    // Collection: products
+    // Fields: name, description, price, category, updatedAt
+    //
+    // Collection: knowledge_sources
+    // Fields: type, content, status, createdAt
+    //
+    // ===============================================================
+
     // Helper functions
     function isAuthenticated() {
       return request.auth != null;
@@ -8,16 +26,16 @@ service cloud.firestore {
     
     function isAdmin() {
       return isAuthenticated() && 
-        (request.auth.token.email == "drisatech@gmail.com" && request.auth.token.email_verified == true);
+        (request.auth.token.email == "drisatech@gmail.com");
     }
 
-    // Leads: AI can write, Admin can read/write
+    // Leads: Public can create (for AI capture), Admin can read/write
     match /leads/{leadId} {
-      allow create: if true; // Allow AI (server-side or client) to create leads
+      allow create: if true; 
       allow read, update, delete: if isAdmin();
     }
 
-    // Conversations: AI can write, Admin can read/write
+    // Conversations: Public can create (for AI logging), Admin can read/write
     match /conversations/{convId} {
       allow create: if true;
       allow read, update, delete: if isAdmin();
@@ -27,6 +45,16 @@ service cloud.firestore {
     match /products/{productId} {
       allow read: if true;
       allow write: if isAdmin();
+    }
+
+    // Knowledge Sources: Admin only
+    match /knowledge_sources/{sourceId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

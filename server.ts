@@ -128,11 +128,16 @@ app.get('/api/config', (req, res) => {
 // KB Processing Route
 app.post('/api/kb/process', async (req, res) => {
   const { type, content, id } = req.body;
-  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY;
   
-  if (!apiKey) {
-    console.error('[Gemini] API Key is missing');
-    return res.status(500).json({ error: 'Gemini API Key is missing' });
+  const isPlaceholder = apiKey === 'MY_GEMINI_API_KEY' || !apiKey;
+
+  if (isPlaceholder) {
+    console.error('[Gemini] API Key is missing or set to placeholder');
+    return res.status(500).json({ 
+      error: 'Gemini API Key is missing or invalid.',
+      details: 'Please go to the "Secrets" or "Environment Variables" tab in the AI Studio settings and ensure GEMINI_API_KEY is set to a valid key from https://aistudio.google.com/app/apikey'
+    });
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -327,15 +332,15 @@ async function startServer() {
     let startTime = new Date().toISOString();
     let audioOutputBuffer = Buffer.alloc(0);
     
-    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
-    const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
-
     const connectToGemini = async () => {
-      const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
-      if (!apiKey) {
-        console.error('[Gemini] API Key is missing, cannot connect. Please check your environment variables.');
+      const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY;
+      if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+        console.error('[Gemini] API Key is missing or set to placeholder. Please check your environment variables.');
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ event: 'error', message: 'Gemini API Key is missing' }));
+          ws.send(JSON.stringify({ 
+            event: 'error', 
+            message: 'Gemini API Key is missing or invalid. Please configure GEMINI_API_KEY in the Secrets panel.' 
+          }));
           ws.close();
         }
         return;
@@ -583,8 +588,8 @@ async function startServer() {
       // Log session to Firestore
       if (transcript.length > 0 && firestore) {
         try {
-          const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
-          if (!apiKey) throw new Error('Gemini API Key is missing');
+          const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY;
+          if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') throw new Error('Gemini API Key is missing or invalid');
           
           const ai = new GoogleGenAI({ apiKey });
           const summaryResponse = await ai.models.generateContent({

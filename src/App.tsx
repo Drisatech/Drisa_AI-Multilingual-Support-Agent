@@ -13,6 +13,7 @@ export default function App() {
   const [preferredLanguage, setPreferredLanguage] = useState('English');
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [messageInput, setMessageInput] = useState('');
   
   // Sessions State
@@ -69,6 +70,21 @@ export default function App() {
     }) : () => {};
     return () => unsubscribe();
   }, []);
+
+  const handleLogin = async () => {
+    if (isLoggingIn) return;
+    setIsLoggingIn(true);
+    try {
+      await signInWithGoogle();
+    } catch (err: any) {
+      if (err.code !== 'auth/cancelled-popup-request' && err.code !== 'auth/popup-closed-by-user') {
+        console.error("Login error:", err);
+        alert(`Login failed: ${err.message}`);
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
 
   useEffect(() => {
     if (isAdmin && activeTab === 'kb' && fdb) {
@@ -203,11 +219,12 @@ export default function App() {
               </div>
             ) : (
               <button 
-                onClick={signInWithGoogle}
-                className="w-full flex items-center gap-3 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors text-white text-sm"
+                onClick={handleLogin}
+                disabled={isLoggingIn}
+                className="w-full flex items-center gap-3 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors text-white text-sm disabled:opacity-50"
               >
                 <LogIn className="w-4 h-4" />
-                Admin Login
+                {isLoggingIn ? 'Logging in...' : 'Admin Login'}
               </button>
             )}
           </div>
