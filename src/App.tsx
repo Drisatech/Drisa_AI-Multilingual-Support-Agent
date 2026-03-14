@@ -14,7 +14,9 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [messageInput, setMessageInput] = useState('');
+  const [debugAuth, setDebugAuth] = useState(false);
   
   // Sessions State
   const [sessions, setSessions] = useState<any[]>([]);
@@ -25,6 +27,7 @@ export default function App() {
   const [newSourceUrl, setNewSourceUrl] = useState('');
   const [newSourceArticle, setNewSourceArticle] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [appError, setAppError] = useState<string | null>(null);
 
   const { isConnected, isConnecting, error, connect, disconnect, sendMessage } = useLiveAgent();
   const [callDuration, setCallDuration] = useState(0);
@@ -65,19 +68,27 @@ export default function App() {
     }
 
     const unsubscribe = auth ? onAuthStateChanged(auth, (u) => {
+      console.log("Auth state changed:", u?.email);
       setUser(u);
-      setIsAdmin(u?.email === 'drisatech@gmail.com');
-    }) : () => {};
+      setIsAdmin(u?.email?.toLowerCase() === 'drisatech@gmail.com');
+      setIsAuthLoading(false);
+    }) : () => { setIsAuthLoading(false); };
 
     // Handle redirect result
     if (auth) {
       getRedirectResult(auth).then((result) => {
         if (result?.user) {
+          console.log("Redirect result user:", result.user.email);
           setUser(result.user);
-          setIsAdmin(result.user.email === 'drisatech@gmail.com');
+          setIsAdmin(result.user.email?.toLowerCase() === 'drisatech@gmail.com');
         }
+        setIsAuthLoading(false);
       }).catch((err) => {
-        console.error("Redirect auth error:", err);
+        console.error("Redirect auth error:", err.code, err.message);
+        setIsAuthLoading(false);
+        if (err.code === 'auth/unauthorized-domain') {
+          setAppError(`Domain Unauthorized: Please add ${window.location.hostname} to your Firebase Authorized Domains.`);
+        }
       });
     }
 
@@ -88,11 +99,16 @@ export default function App() {
     if (isLoggingIn) return;
     setIsLoggingIn(true);
     try {
-      await signInWithGoogle();
+      const user = await signInWithGoogle();
+      if (user) {
+        console.log("Login success for:", user.email);
+      }
     } catch (err: any) {
-      if (err.code !== 'auth/cancelled-popup-request' && err.code !== 'auth/popup-closed-by-user') {
-        console.error("Login error:", err);
-        alert(`Login failed: ${err.message}`);
+      console.error("Login catch block:", err.code, err.message);
+      if (err.code === 'auth/unauthorized-domain') {
+        alert(`Domain Unauthorized: Please add ${window.location.hostname} to your Firebase Console (Authentication -> Settings -> Authorized domains).`);
+      } else if (err.code !== 'auth/cancelled-popup-request' && err.code !== 'auth/popup-closed-by-user') {
+        alert(`Login failed: ${err.message} (${err.code})`);
       }
     } finally {
       setIsLoggingIn(false);
@@ -104,18 +120,27 @@ export default function App() {
       const q = query(collection(fdb, 'knowledge_sources'), orderBy('createdAt', 'desc'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
         setKbSources(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, (err) => {
+        console.error("Firestore KB Error:", err);
+        if (err.message.includes('insufficient permissions')) {
+          setAppError("Firestore Permission Denied: Your account may not have admin privileges in the security rules.");
+        }
       });
       return () => unsubscribe();
     } else if (isAdmin && activeTab === 'sessions' && fdb) {
       const q = query(collection(fdb, 'conversations'), orderBy('createdAt', 'desc'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
         setSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, (err) => {
+        console.error("Firestore Sessions Error:", err);
       });
       return () => unsubscribe();
     } else if (isAdmin && activeTab === 'leads' && fdb) {
       const q = query(collection(fdb, 'leads'), orderBy('createdAt', 'desc'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
         setLeads(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, (err) => {
+        console.error("Firestore Leads Error:", err);
       });
       return () => unsubscribe();
     }
@@ -216,7 +241,11 @@ export default function App() {
           </nav>
 
           <div className="p-4 border-t border-white/10">
-            {user ? (
+            {isAuthLoading ? (
+              <div className="flex items-center justify-center p-4">
+                <Activity className="w-5 h-5 animate-spin text-white/20" />
+              </div>
+            ) : user ? (
               <div className="space-y-2">
                 <div className="px-4 py-2 text-xs text-white/50 truncate">
                   Logged in as: <span className="text-white/80">{user.email}</span>
@@ -227,6 +256,22 @@ export default function App() {
                     </div>
                   )}
                 </div>
+                <button 
+                  onClick={() => setDebugAuth(!debugAuth)}
+                  className="w-full flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-white/10 transition-colors text-white/40 text-[10px] uppercase tracking-widest"
+                >
+                  <Settings className="w-3 h-3" />
+                  {debugAuth ? 'Hide Debug' : 'Show Debug'}
+                </button>
+                {debugAuth && (
+                  <div className="p-2 bg-black/40 rounded-lg text-[10px] font-mono text-white/60 break-all overflow-auto max-h-32">
+                    <p>UID: {user.uid}</p>
+                    <p>Email: {user.email}</p>
+                    <p>Verified: {String(user.emailVerified)}</p>
+                    <p>Admin: {String(isAdmin)}</p>
+                    <p>Domain: {window.location.hostname}</p>
+                  </div>
+                )}
                 <button 
                   onClick={() => signOut(auth)}
                   className="w-full flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-white/10 transition-colors text-white/70 text-sm"
@@ -251,6 +296,17 @@ export default function App() {
 
       {/* Main Content */}
       <main className={`flex-1 overflow-y-auto ${isWidgetMode ? 'p-4' : 'p-6 md:p-10'}`}>
+        {appError && (
+          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center justify-between gap-3 text-red-500 text-sm">
+            <div className="flex items-center gap-3">
+              <Activity className="w-5 h-5" />
+              <p>{appError}</p>
+            </div>
+            <button onClick={() => setAppError(null)} className="p-1 hover:bg-red-500/10 rounded">
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+        )}
         {(!fdb || !auth) && (
           <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center gap-3 text-amber-500 text-sm">
             <Activity className="w-5 h-5" />
