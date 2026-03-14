@@ -62,10 +62,16 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // --- Google Calendar OAuth Setup ---
+const getRedirectUri = (req?: any) => {
+  if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
+  const baseUrl = process.env.APP_URL || (req ? `${req.protocol}://${req.get('host')}` : '');
+  return `${baseUrl.replace(/\/$/, '')}/auth/google/callback`;
+};
+
 const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
-  process.env.GOOGLE_REDIRECT_URI || `${process.env.APP_URL}/auth/google/callback`
+  getRedirectUri()
 );
 
 async function getGoogleCalendarTokens() {
@@ -313,10 +319,13 @@ app.get('/api/auth/google/status', async (req, res) => {
 });
 
 app.get('/api/auth/google/url', (req, res) => {
+  const redirectUri = getRedirectUri(req);
+
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: ['https://www.googleapis.com/auth/calendar.events'],
-    prompt: 'consent'
+    prompt: 'consent select_account',
+    redirect_uri: redirectUri
   });
   res.json({ url });
 });
@@ -324,7 +333,11 @@ app.get('/api/auth/google/url', (req, res) => {
 app.get('/auth/google/callback', async (req, res) => {
   const { code } = req.query;
   try {
-    const { tokens } = await oauth2Client.getToken(code as string);
+    const redirectUri = getRedirectUri(req);
+    const { tokens } = await oauth2Client.getToken({
+      code: code as string,
+      redirect_uri: redirectUri
+    });
     await saveGoogleCalendarTokens(tokens);
     
     res.send(`
