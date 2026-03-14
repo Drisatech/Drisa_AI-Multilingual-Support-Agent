@@ -49,9 +49,10 @@ CONVERSATION RULES:
 1. Keep responses VERY CONCISE (1-2 sentences) to reduce latency and keep the flow natural.
 2. If you need to look up information, tell the user: "Just a moment while I check that for you, Sir/Ma."
 3. Use 'lookupCatalog' for product inquiries. If the catalog is empty, use your knowledge of DrisaTech (Solar, CCTV, Smart Home).
-4. Use 'sendFollowUp' to capture contact details and send real messages.
+4. Use 'sendFollowUp' to capture contact details and send real messages. You MUST call this tool as soon as the user provides their email or WhatsApp number.
 5. If a user says they didn't receive a message, use 'checkServiceStatus' to see if the system is configured correctly.
 6. Always confirm contact information clearly before sending a follow-up.
+7. IMPORTANT: If the user types their contact info in the text box, acknowledge it and call 'sendFollowUp'.
 
 Goal: Provide expert advice on DrisaTech products with a rhythmic Nigerian flair in the user's language of choice.`;
 
@@ -529,10 +530,11 @@ async function startServer() {
                     const contactAddress = args.contactAddress || args.contact_address;
                     const msg = args.message || args.msg;
                     
-                    console.log(`[Follow-up] Sending ${contactType} to ${contactAddress}`);
-                    console.log(`[Follow-up] Message: ${msg}`);
+                    console.log(`[Follow-up Tool] Called with: type=${contactType}, address=${contactAddress}`);
+                    console.log(`[Follow-up Tool] Message length: ${msg?.length || 0}`);
                     
                     if (!contactType || !contactAddress || !msg) {
+                      console.error('[Follow-up Tool] Missing arguments');
                       return { id: call.id, name: call.name, response: { error: "Missing required arguments: contactType, contactAddress, or message" } };
                     }
 
@@ -574,13 +576,14 @@ async function startServer() {
                           });
 
                           const data = await response.json() as any;
+                          console.log(`[Meta WhatsApp] API Response Status: ${response.status}`);
                           
                           if (response.ok) {
-                            console.log(`[Meta WhatsApp] Message sent: ${data.messages?.[0]?.id}`);
+                            console.log(`[Meta WhatsApp] Message sent successfully: ${data.messages?.[0]?.id}`);
                             whatsappResult = "SUCCESS: Real WhatsApp message sent via Meta API.";
                             realSendSuccess = true;
                           } else {
-                            console.error('[Meta WhatsApp] API Error:', data);
+                            console.error('[Meta WhatsApp] API Error Details:', JSON.stringify(data));
                             const errorMsg = data.error?.message || response.statusText;
                             whatsappResult = `FAILED: Meta API error - ${errorMsg}. Note: Meta requires users to message the business first within 24 hours for free-form messages.`;
                           }
@@ -713,6 +716,19 @@ async function startServer() {
           const from = data.start?.customParameters?.from;
           preferredLanguage = data.preferredLanguage || 'English';
           connectToGemini();
+        } else if (data.event === 'message') {
+          const text = data.text;
+          console.log(`[Browser] Received text message: ${text}`);
+          if (text) {
+            transcript.push({ role: 'Customer', text, timestamp: new Date().toISOString() });
+            if (geminiSession) {
+              geminiSession.sendRealtimeInput({ parts: [{ text }] });
+            } else if (!isConnectingGemini) {
+              connectToGemini().then(() => {
+                if (geminiSession) geminiSession.sendRealtimeInput({ parts: [{ text }] });
+              });
+            }
+          }
         } else if (data.event === 'media' || data.event === 'audio') {
           const payload = getPayload(data);
           if (data.streamSid && !streamSid) {

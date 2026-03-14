@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Product, FollowUp } from './types';
 import { useLiveAgent } from './hooks/useLiveAgent';
 import { Mic, MicOff, Phone, PhoneOff, Package, MessageSquare, Settings, Activity, Sun, Moon, BookOpen, LogIn, LogOut, Globe, FileText, Plus, Trash2, Send } from 'lucide-react';
-import { auth, signInWithGoogle, db as fdb } from './firebase';
+import { auth, signInWithGoogle, db as fdb, getRedirectResult } from './firebase';
 import { onAuthStateChanged, User, signOut } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 
@@ -68,6 +68,19 @@ export default function App() {
       setUser(u);
       setIsAdmin(u?.email === 'drisatech@gmail.com');
     }) : () => {};
+
+    // Handle redirect result
+    if (auth) {
+      getRedirectResult(auth).then((result) => {
+        if (result?.user) {
+          setUser(result.user);
+          setIsAdmin(result.user.email === 'drisatech@gmail.com');
+        }
+      }).catch((err) => {
+        console.error("Redirect auth error:", err);
+      });
+    }
+
     return () => unsubscribe();
   }, []);
 
@@ -207,7 +220,12 @@ export default function App() {
               <div className="space-y-2">
                 <div className="px-4 py-2 text-xs text-white/50 truncate">
                   Logged in as: <span className="text-white/80">{user.email}</span>
-                  {!isAdmin && <div className="text-amber-400 mt-1">Not an admin</div>}
+                  {!isAdmin && (
+                    <div className="text-amber-400 mt-2 p-2 bg-amber-400/10 border border-amber-400/20 rounded-lg">
+                      <p className="font-bold">Access Restricted</p>
+                      <p className="opacity-80">Only drisatech@gmail.com has admin access.</p>
+                    </div>
+                  )}
                 </div>
                 <button 
                   onClick={() => signOut(auth)}
