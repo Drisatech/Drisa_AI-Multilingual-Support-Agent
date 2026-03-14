@@ -20,6 +20,53 @@ A professional multilingual AI Voice Support Agent built with React, Express, an
   <img src="public/architecture.svg" alt="Drisa_AI Architecture Diagram" width="100%">
 </p>
 
+### 📊 System Flow (Mermaid)
+
+```mermaid
+graph TD
+    subgraph Client_Layer [Client Layer]
+        A[User Web App - React]
+        B[Admin Dashboard - React]
+        C[Phone / Telephony - Twilio]
+    end
+
+    subgraph Backend_Core [Backend Core - Node.js/Express]
+        D[Session Manager]
+        E[Audio Transcoder]
+        F[Tool Orchestrator]
+        G[RAG Engine]
+    end
+
+    subgraph AI_Intelligence [AI Intelligence]
+        H[Gemini 2.5 Flash Live API]
+    end
+
+    subgraph Data_Persistence [Data Persistence]
+        I[(Google Firestore)]
+    end
+
+    subgraph External_Integrations [External Integrations]
+        J[Google Calendar API]
+        K[Meta WhatsApp API]
+        L[Nodemailer / SMTP]
+    end
+
+    A <-->|WebSocket| D
+    C <-->|Media Stream| D
+    B <-->|REST API| D
+    
+    D <--> E
+    D <--> F
+    F <--> G
+    
+    D <-->|Live Stream| H
+    F <--> I
+    
+    F --> J
+    F --> K
+    F --> L
+```
+
 ### 🔄 Workflow Overview
 
 1.  **Multimodal Ingress**: Users engage via a high-fidelity React web interface or traditional telephony (Twilio), establishing a low-latency WebSocket or Media Stream connection.
