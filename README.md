@@ -16,7 +16,9 @@ A professional multilingual AI Voice Support Agent built with React, Express, an
 
 ## Architecture
 
-![Drisa_AI Architecture Diagram](./public/architecture.svg)
+<p align="center">
+  <img src="public/architecture.svg" alt="Drisa_AI Architecture Diagram" width="100%">
+</p>
 
 ### 🔄 Workflow Overview
 
@@ -217,10 +219,18 @@ Drisa_AI is engineered for scale. The roadmap transforms this agent into a compr
 
 ---
 
-## 🧾 License
+## 🧾 License & Hackathon Context
 
-This portfolio is provided for educational and professional review.
-All images and architectures are proprietary to Aliyu Idris Adeiza and may not be reused without permission.
+This project was developed specifically for the **Gemini Live Agent Hackathon** on **Devpost**. 
+
+Drisa_AI is an open-source initiative provided under the **MIT License**. We encourage developers and businesses to explore, contribute, and join us in our mission to democratize access to AI technology across Africa.
+
+---
+
+**Hackathon Submission Details:**
+- **Platform:** Devpost
+- **Challenge:** Gemini Live Agent Hackathon
+- **Core Focus:** Multimodal Live API, Real-time Voice Interaction, and Social Inclusivity.
 
 ---
 
