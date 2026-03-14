@@ -7,6 +7,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
 import { GoogleGenAI, Modality, Type } from '@google/genai';
+import nodemailer from 'nodemailer';
 import { db } from './db.js';
 import { Firestore } from '@google-cloud/firestore';
 import pkg from 'wavefile';
@@ -480,6 +481,100 @@ async function startServer() {
                       return { id: call.id, name: call.name, response: { error: "Missing required arguments: contactType, contactAddress, or message" } };
                     }
 
+                    let whatsappResult = "Not attempted (only logged to database)";
+                    let emailResult = "Not attempted (only logged to database)";
+
+                    // Attempt to send real WhatsApp message if configured via Meta WhatsApp Business API
+                    if (contactType === 'whatsapp') {
+                      const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+                      const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+
+                      if (accessToken && phoneNumberId) {
+                        try {
+                          // Clean the phone number: remove non-digits and leading +
+                          let to = contactAddress.trim().replace(/\D/g, '');
+                          
+                          // If it doesn't start with a country code (assuming Nigeria +234 as default if it's short)
+                          if (to.length <= 11 && !to.startsWith('234')) {
+                            to = '234' + (to.startsWith('0') ? to.substring(1) : to);
+                          }
+
+                          const response = await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+                            method: 'POST',
+                            headers: {
+                              'Authorization': `Bearer ${accessToken}`,
+                              'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                              messaging_product: "whatsapp",
+                              recipient_type: "individual",
+                              to: to,
+                              type: "text",
+                              text: {
+                                preview_url: false,
+                                body: msg
+                              }
+                            })
+                          });
+
+                          const data = await response.json() as any;
+                          
+                          if (response.ok) {
+                            console.log(`[Meta WhatsApp] Message sent: ${data.messages?.[0]?.id}`);
+                            whatsappResult = "Real WhatsApp message sent via Meta API";
+                          } else {
+                            console.error('[Meta WhatsApp] API Error:', data);
+                            whatsappResult = "Failed to send real WhatsApp: " + (data.error?.message || response.statusText);
+                          }
+                        } catch (err) {
+                          console.error('[Meta WhatsApp] Error sending WhatsApp:', err);
+                          whatsappResult = "Failed to send real WhatsApp: " + (err instanceof Error ? err.message : String(err));
+                        }
+                      } else {
+                        console.log('[Meta WhatsApp] Credentials missing, skipping real WhatsApp send.');
+                        whatsappResult = "Meta WhatsApp credentials missing - message only logged to database";
+                      }
+                    }
+
+                    // Attempt to send real Email if configured
+                    if (contactType === 'email') {
+                      const smtpUser = process.env.SMTP_USER;
+                      const smtpPass = process.env.SMTP_PASS;
+                      const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
+                      const smtpPort = parseInt(process.env.SMTP_PORT || '465');
+
+                      if (smtpUser && smtpPass) {
+                        try {
+                          const transporter = nodemailer.createTransport({
+                            host: smtpHost,
+                            port: smtpPort,
+                            secure: smtpPort === 465, // true for 465, false for other ports
+                            auth: {
+                              user: smtpUser,
+                              pass: smtpPass,
+                            },
+                          });
+
+                          const info = await transporter.sendMail({
+                            from: `"${process.env.SMTP_FROM_NAME || 'Drisa AI Agent'}" <${smtpUser}>`,
+                            to: contactAddress,
+                            subject: "Follow-up from Drisa",
+                            text: msg,
+                            html: `<p>${msg.replace(/\n/g, '<br>')}</p>`,
+                          });
+
+                          console.log(`[Email] Message sent: ${info.messageId}`);
+                          emailResult = "Real Email sent successfully";
+                        } catch (err) {
+                          console.error('[Email] Error sending email:', err);
+                          emailResult = "Failed to send real Email: " + (err instanceof Error ? err.message : String(err));
+                        }
+                      } else {
+                        console.log('[Email] SMTP credentials missing, skipping real email send.');
+                        emailResult = "Email credentials missing - message only logged to database";
+                      }
+                    }
+
                     if (firestore) {
                       try {
                         await firestore.collection('leads').add({
@@ -496,7 +591,8 @@ async function startServer() {
                       }
                     }
                     
-                    return { id: call.id, name: call.name, response: { result: "Follow-up sent successfully via " + contactType } };
+                    const finalResult = contactType === 'whatsapp' ? whatsappResult : emailResult;
+                    return { id: call.id, name: call.name, response: { result: "Follow-up processed. " + finalResult } };
                   }
                   return { id: call.id, name: call.name, response: { error: "Unknown function" } };
                 }));
