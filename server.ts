@@ -58,7 +58,12 @@ Goal: Provide expert advice on DrisaTech products with a rhythmic Nigerian flair
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// --- Audio Conversion Helpers ---
+// --- Helpers ---
+function cleanJson(text: string): string {
+  // Remove markdown code blocks if present
+  return text.replace(/```json\n?|```/g, '').trim();
+}
+
 function mulawToPcm16(base64Payload: string): string {
   try {
     const buffer = Buffer.from(base64Payload, 'base64');
@@ -139,16 +144,25 @@ app.post('/api/kb/process', async (req, res) => {
     console.error('[Gemini] API Key is missing or set to placeholder');
     return res.status(500).json({ 
       error: 'Gemini API Key is missing or invalid.',
-      details: 'Please go to the "Secrets" or "Environment Variables" tab in the AI Studio settings and ensure GEMINI_API_KEY is set to a valid key from https://aistudio.google.com/app/apikey'
+      details: 'Please go to the "Secrets" or "Environment Variables" tab in the AI Studio settings and ensure GEMINI_API_KEY is set to a valid key.'
     });
+  }
+
+  if (!firestore) {
+    console.error('[Firestore] Firestore not initialized');
+    return res.status(500).json({ error: 'Database connection failed' });
   }
 
   const ai = new GoogleGenAI({ apiKey });
 
   try {
+    console.log(`[KB] Processing ${type} for ID: ${id}`);
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Extract product information (name, description, price in Naira, category) from this ${type === 'url' ? 'website URL' : 'article'}: ${content}. Return a JSON array of products.`,
+      contents: `Extract product information (name, description, price, category) from this ${type === 'url' ? 'website URL' : 'article'}: ${content}. 
+      Return a JSON array of objects. 
+      Prices should be strings (e.g. "₦150,000"). 
+      If no products are found, return an empty array [].`,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -158,41 +172,58 @@ app.post('/api/kb/process', async (req, res) => {
             properties: {
               name: { type: Type.STRING },
               description: { type: Type.STRING },
-              price: { type: Type.NUMBER },
+              price: { type: Type.STRING },
               category: { type: Type.STRING }
             },
-            required: ["name", "price"]
+            required: ["name", "description"]
           }
         }
       }
     });
     
-    const products = JSON.parse(response.text);
-    const batch = firestore.batch();
-    products.forEach((p: any) => {
-      const docRef = firestore.collection('products').doc();
-      batch.set(docRef, { ...p, updatedAt: new Date().toISOString() });
-    });
-    await batch.commit();
+    const cleanedJson = cleanJson(response.text);
+    console.log(`[KB] Gemini response:`, cleanedJson);
+    const products = JSON.parse(cleanedJson);
+    
+    if (Array.isArray(products) && products.length > 0) {
+      const batch = firestore.batch();
+      products.forEach((p: any) => {
+        const docRef = firestore.collection('products').doc();
+        batch.set(docRef, { 
+          ...p, 
+          sourceId: id,
+          updatedAt: new Date().toISOString() 
+        });
+      });
+      await batch.commit();
+      console.log(`[KB] Successfully added ${products.length} products to catalog`);
+    } else {
+      console.log(`[KB] No products extracted from source`);
+    }
 
     // Update source status
     if (id) {
-      await firestore.collection('knowledge_sources').doc(id).update({ status: 'processed' });
-    } else {
-      const sources = await firestore.collection('knowledge_sources')
-        .where('content', '==', content)
-        .limit(1)
-        .get();
-      
-      if (!sources.empty) {
-        await sources.docs[0].ref.update({ status: 'processed' });
-      }
+      await firestore.collection('knowledge_sources').doc(id).update({ 
+        status: 'processed',
+        processedAt: new Date().toISOString(),
+        productCount: products.length
+      });
     }
 
-    res.json({ success: true });
+    res.json({ success: true, count: products.length });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to process knowledge source' });
+    console.error('[KB] Processing error:', err);
+    if (id && firestore) {
+      try {
+        await firestore.collection('knowledge_sources').doc(id).update({ 
+          status: 'failed',
+          error: err instanceof Error ? err.message : String(err)
+        });
+      } catch (e) {
+        console.error('[KB] Failed to update error status:', e);
+      }
+    }
+    res.status(500).json({ error: 'Failed to process knowledge source', details: err instanceof Error ? err.message : String(err) });
   }
 });
 
@@ -464,7 +495,8 @@ async function startServer() {
                     if (firestore) {
                       try {
                         const snapshot = await firestore.collection('products').get();
-                        products = snapshot.docs.map(doc => doc.data());
+                        products = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        console.log(`[Catalog] Found ${products.length} products in database`);
                       } catch (e) {
                         console.error('[Firestore] Failed to fetch products:', e);
                       }
@@ -472,22 +504,25 @@ async function startServer() {
 
                     // Fallback catalog if database is empty
                     if (products.length === 0) {
+                      console.log('[Catalog] Using fallback data');
                       products = [
-                        { name: "Drisa Solar Kit 5KVA", description: "Complete solar solution for homes and offices. Includes panels, inverter, and batteries.", price: "₦1,250,000" },
-                        { name: "Drisa Smart CCTV 4-Cam", description: "High-definition security cameras with mobile app access and night vision.", price: "₦185,000" },
-                        { name: "Drisa Smart Door Lock", description: "Biometric and remote access door lock for enhanced security.", price: "₦45,000" },
-                        { name: "Drisa Solar Street Light", description: "All-in-one solar street light with motion sensor.", price: "₦35,000" }
+                        { name: "Drisa Solar Kit 5KVA", description: "Complete solar solution for homes and offices. Includes panels, inverter, and batteries.", price: "₦1,250,000", category: "Solar" },
+                        { name: "Drisa Smart CCTV 4-Cam", description: "High-definition security cameras with mobile app access and night vision.", price: "₦185,000", category: "Security" },
+                        { name: "Drisa Smart Door Lock", description: "Biometric and remote access door lock for enhanced security.", price: "₦45,000", category: "Security" },
+                        { name: "Drisa Solar Street Light", description: "All-in-one solar street light with motion sensor.", price: "₦35,000", category: "Solar" }
                       ];
                     }
                     
                     if (query) {
+                      const lowerQuery = query.toLowerCase();
                       products = products.filter(p => 
-                        p.name.toLowerCase().includes(query.toLowerCase()) || 
-                        p.description.toLowerCase().includes(query.toLowerCase())
+                        (p.name && p.name.toLowerCase().includes(lowerQuery)) || 
+                        (p.description && p.description.toLowerCase().includes(lowerQuery)) ||
+                        (p.category && p.category.toLowerCase().includes(lowerQuery))
                       );
                     }
                     
-                    return { id: call.id, name: call.name, response: { result: products } };
+                    return { id: call.id, name: call.name, response: { result: products, count: products.length } };
                   } else if (call.name === 'sendFollowUp') {
                     const args = call.args as any;
                     const contactType = args.contactType || args.contact_type;
