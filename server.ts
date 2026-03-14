@@ -66,10 +66,14 @@ app.use(express.urlencoded({ extended: true }));
 const getRedirectUri = (req?: any) => {
   if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
   
-  // Use APP_URL if available, otherwise try to derive from request
+  // Use APP_URL if available
   let baseUrl = process.env.APP_URL;
+  
+  // If no APP_URL, try to derive from request headers (more reliable for proxies)
   if (!baseUrl && req) {
-    baseUrl = `${req.protocol}://${req.get('host')}`;
+    const host = req.get('x-forwarded-host') || req.get('host');
+    const protocol = req.get('x-forwarded-proto') || req.protocol;
+    baseUrl = `${protocol}://${host}`;
   }
   
   if (!baseUrl) return '';
@@ -333,23 +337,15 @@ app.get('/api/auth/google/url', (req, res) => {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
 
+  const redirectUri = getRedirectUri(req);
+  console.log(`[OAuth] Generating Auth URL with redirect_uri: ${redirectUri}`);
+
   if (!clientId || !clientSecret) {
-    console.error('Google OAuth Configuration Error:', {
-      hasClientId: !!clientId,
-      hasClientSecret: !!clientSecret,
-      envKeys: Object.keys(process.env).filter(k => k.includes('GOOGLE'))
-    });
-    
-    let missing = [];
-    if (!clientId) missing.push('GOOGLE_CLIENT_ID');
-    if (!clientSecret) missing.push('GOOGLE_CLIENT_SECRET');
-    
+    console.error('Google OAuth Configuration Error: Missing Client ID or Secret');
     return res.status(500).json({ 
-      error: `Google OAuth is not fully configured. Missing: ${missing.join(', ')}. Please ensure these are set in your AI Studio Secrets.` 
+      error: 'Google OAuth is not fully configured. Please ensure GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are set.' 
     });
   }
-
-  const redirectUri = getRedirectUri(req);
   const client = getOAuth2Client(req);
 
   const url = client.generateAuthUrl({
@@ -365,6 +361,7 @@ app.get('/auth/google/callback', async (req, res) => {
   const { code } = req.query;
   try {
     const redirectUri = getRedirectUri(req);
+    console.log(`[OAuth] Callback received. Using redirect_uri: ${redirectUri}`);
     const client = getOAuth2Client(req);
     const { tokens } = await client.getToken({
       code: code as string,
