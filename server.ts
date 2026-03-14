@@ -330,10 +330,22 @@ app.get('/api/auth/google/status', async (req, res) => {
 });
 
 app.get('/api/auth/google/url', (req, res) => {
-  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
-    console.error('Missing Google OAuth environment variables: GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET');
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) {
+    console.error('Google OAuth Configuration Error:', {
+      hasClientId: !!clientId,
+      hasClientSecret: !!clientSecret,
+      envKeys: Object.keys(process.env).filter(k => k.includes('GOOGLE'))
+    });
+    
+    let missing = [];
+    if (!clientId) missing.push('GOOGLE_CLIENT_ID');
+    if (!clientSecret) missing.push('GOOGLE_CLIENT_SECRET');
+    
     return res.status(500).json({ 
-      error: 'Google OAuth is not configured. Please add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to the app settings.' 
+      error: `Google OAuth is not fully configured. Missing: ${missing.join(', ')}. Please ensure these are set in your AI Studio Secrets.` 
     });
   }
 
