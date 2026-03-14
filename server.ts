@@ -30,6 +30,7 @@ try {
 }
 
 const app = express();
+app.set('trust proxy', true);
 const PORT = Number(process.env.PORT) || 3000;
 
 const SYSTEM_INSTRUCTION = `You are Drisa, a professional Nigerian AI Sales & Support Agent for DrisaTech (https://drisatech.com.ng).
@@ -64,15 +65,25 @@ app.use(express.urlencoded({ extended: true }));
 // --- Google Calendar OAuth Setup ---
 const getRedirectUri = (req?: any) => {
   if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
-  const baseUrl = process.env.APP_URL || (req ? `${req.protocol}://${req.get('host')}` : '');
+  
+  // Use APP_URL if available, otherwise try to derive from request
+  let baseUrl = process.env.APP_URL;
+  if (!baseUrl && req) {
+    baseUrl = `${req.protocol}://${req.get('host')}`;
+  }
+  
+  if (!baseUrl) return '';
+  
   return `${baseUrl.replace(/\/$/, '')}/auth/google/callback`;
 };
 
-const oauth2Client = new google.auth.OAuth2(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  getRedirectUri()
-);
+const getOAuth2Client = (req?: any) => {
+  return new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    getRedirectUri(req)
+  );
+};
 
 async function getGoogleCalendarTokens() {
   if (!firestore) return null;
@@ -320,8 +331,9 @@ app.get('/api/auth/google/status', async (req, res) => {
 
 app.get('/api/auth/google/url', (req, res) => {
   const redirectUri = getRedirectUri(req);
+  const client = getOAuth2Client(req);
 
-  const url = oauth2Client.generateAuthUrl({
+  const url = client.generateAuthUrl({
     access_type: 'offline',
     scope: ['https://www.googleapis.com/auth/calendar.events'],
     prompt: 'consent select_account',
@@ -334,7 +346,8 @@ app.get('/auth/google/callback', async (req, res) => {
   const { code } = req.query;
   try {
     const redirectUri = getRedirectUri(req);
-    const { tokens } = await oauth2Client.getToken({
+    const client = getOAuth2Client(req);
+    const { tokens } = await client.getToken({
       code: code as string,
       redirect_uri: redirectUri
     });
@@ -793,8 +806,9 @@ async function startServer() {
                         return { id: call.id, name: call.name, response: { error: "Google Calendar is not connected. Please ask the admin to connect it in the dashboard." } };
                       }
                       
-                      oauth2Client.setCredentials(tokens);
-                      const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+                      const client = getOAuth2Client();
+                      client.setCredentials(tokens);
+                      const calendar = google.calendar({ version: 'v3', auth: client });
                       
                       const event = {
                         summary,
