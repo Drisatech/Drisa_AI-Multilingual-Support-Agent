@@ -48,8 +48,10 @@ TONE & VOICE:
 CONVERSATION RULES:
 1. Keep responses VERY CONCISE (1-2 sentences) to reduce latency and keep the flow natural.
 2. If you need to look up information, tell the user: "Just a moment while I check that for you, Sir/Ma."
-3. Use 'lookupCatalog' for product inquiries and 'sendFollowUp' to capture contact details.
-4. Always confirm contact information clearly before sending a follow-up.
+3. Use 'lookupCatalog' for product inquiries. If the catalog is empty, use your knowledge of DrisaTech (Solar, CCTV, Smart Home).
+4. Use 'sendFollowUp' to capture contact details and send real messages.
+5. If a user says they didn't receive a message, use 'checkServiceStatus' to see if the system is configured correctly.
+6. Always confirm contact information clearly before sending a follow-up.
 
 Goal: Provide expert advice on DrisaTech products with a rhythmic Nigerian flair in the user's language of choice.`;
 
@@ -401,6 +403,14 @@ async function startServer() {
                     },
                     required: ["contactType", "contactAddress", "message"]
                   }
+                },
+                {
+                  name: "checkServiceStatus",
+                  description: "Check if the messaging services (WhatsApp/Email) are correctly configured with API keys.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {}
+                  }
                 }
               ]
             }]
@@ -459,6 +469,16 @@ async function startServer() {
                         console.error('[Firestore] Failed to fetch products:', e);
                       }
                     }
+
+                    // Fallback catalog if database is empty
+                    if (products.length === 0) {
+                      products = [
+                        { name: "Drisa Solar Kit 5KVA", description: "Complete solar solution for homes and offices. Includes panels, inverter, and batteries.", price: "₦1,250,000" },
+                        { name: "Drisa Smart CCTV 4-Cam", description: "High-definition security cameras with mobile app access and night vision.", price: "₦185,000" },
+                        { name: "Drisa Smart Door Lock", description: "Biometric and remote access door lock for enhanced security.", price: "₦45,000" },
+                        { name: "Drisa Solar Street Light", description: "All-in-one solar street light with motion sensor.", price: "₦35,000" }
+                      ];
+                    }
                     
                     if (query) {
                       products = products.filter(p => 
@@ -481,8 +501,9 @@ async function startServer() {
                       return { id: call.id, name: call.name, response: { error: "Missing required arguments: contactType, contactAddress, or message" } };
                     }
 
-                    let whatsappResult = "Not attempted (only logged to database)";
-                    let emailResult = "Not attempted (only logged to database)";
+                    let whatsappResult = "Not attempted";
+                    let emailResult = "Not attempted";
+                    let realSendSuccess = false;
 
                     // Attempt to send real WhatsApp message if configured via Meta WhatsApp Business API
                     if (contactType === 'whatsapp') {
@@ -491,7 +512,7 @@ async function startServer() {
 
                       if (accessToken && phoneNumberId) {
                         try {
-                          // Clean the phone number: remove non-digits and leading +
+                          // Clean the phone number: remove non-digits
                           let to = contactAddress.trim().replace(/\D/g, '');
                           
                           // If it doesn't start with a country code (assuming Nigeria +234 as default if it's short)
@@ -521,18 +542,20 @@ async function startServer() {
                           
                           if (response.ok) {
                             console.log(`[Meta WhatsApp] Message sent: ${data.messages?.[0]?.id}`);
-                            whatsappResult = "Real WhatsApp message sent via Meta API";
+                            whatsappResult = "SUCCESS: Real WhatsApp message sent via Meta API.";
+                            realSendSuccess = true;
                           } else {
                             console.error('[Meta WhatsApp] API Error:', data);
-                            whatsappResult = "Failed to send real WhatsApp: " + (data.error?.message || response.statusText);
+                            const errorMsg = data.error?.message || response.statusText;
+                            whatsappResult = `FAILED: Meta API error - ${errorMsg}. Note: Meta requires users to message the business first within 24 hours for free-form messages.`;
                           }
                         } catch (err) {
                           console.error('[Meta WhatsApp] Error sending WhatsApp:', err);
-                          whatsappResult = "Failed to send real WhatsApp: " + (err instanceof Error ? err.message : String(err));
+                          whatsappResult = "FAILED: Network or system error - " + (err instanceof Error ? err.message : String(err));
                         }
                       } else {
-                        console.log('[Meta WhatsApp] Credentials missing, skipping real WhatsApp send.');
-                        whatsappResult = "Meta WhatsApp credentials missing - message only logged to database";
+                        console.log('[Meta WhatsApp] Credentials missing.');
+                        whatsappResult = "FAILED: Meta WhatsApp credentials (WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID) are missing in the server environment.";
                       }
                     }
 
@@ -548,7 +571,7 @@ async function startServer() {
                           const transporter = nodemailer.createTransport({
                             host: smtpHost,
                             port: smtpPort,
-                            secure: smtpPort === 465, // true for 465, false for other ports
+                            secure: smtpPort === 465,
                             auth: {
                               user: smtpUser,
                               pass: smtpPass,
@@ -564,14 +587,15 @@ async function startServer() {
                           });
 
                           console.log(`[Email] Message sent: ${info.messageId}`);
-                          emailResult = "Real Email sent successfully";
+                          emailResult = "SUCCESS: Real Email sent successfully.";
+                          realSendSuccess = true;
                         } catch (err) {
                           console.error('[Email] Error sending email:', err);
-                          emailResult = "Failed to send real Email: " + (err instanceof Error ? err.message : String(err));
+                          emailResult = "FAILED: SMTP error - " + (err instanceof Error ? err.message : String(err));
                         }
                       } else {
-                        console.log('[Email] SMTP credentials missing, skipping real email send.');
-                        emailResult = "Email credentials missing - message only logged to database";
+                        console.log('[Email] SMTP credentials missing.');
+                        emailResult = "FAILED: Email credentials (SMTP_USER or SMTP_PASS) are missing in the server environment.";
                       }
                     }
 
@@ -583,7 +607,8 @@ async function startServer() {
                           email: contactType === 'email' ? contactAddress : '',
                           notes: msg,
                           createdAt: new Date().toISOString(),
-                          status: 'new'
+                          status: 'new',
+                          realSendSuccess
                         });
                         console.log(`[Firestore] Lead saved: ${contactAddress}`);
                       } catch (e) {
@@ -592,7 +617,19 @@ async function startServer() {
                     }
                     
                     const finalResult = contactType === 'whatsapp' ? whatsappResult : emailResult;
-                    return { id: call.id, name: call.name, response: { result: "Follow-up processed. " + finalResult } };
+                    return { id: call.id, name: call.name, response: { result: finalResult } };
+                  } else if (call.name === 'checkServiceStatus') {
+                    const status = {
+                      whatsapp: {
+                        configured: !!(process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID),
+                        details: process.env.WHATSAPP_ACCESS_TOKEN ? "Token present" : "Token missing"
+                      },
+                      email: {
+                        configured: !!(process.env.SMTP_USER && process.env.SMTP_PASS),
+                        details: process.env.SMTP_USER ? `User: ${process.env.SMTP_USER}` : "Credentials missing"
+                      }
+                    };
+                    return { id: call.id, name: call.name, response: { result: status } };
                   }
                   return { id: call.id, name: call.name, response: { error: "Unknown function" } };
                 }));
