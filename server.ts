@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
 import { GoogleGenAI, Modality, Type } from '@google/genai';
 import nodemailer from 'nodemailer';
+import { google } from 'googleapis';
 import { db } from './db.js';
 import { Firestore } from '@google-cloud/firestore';
 import pkg from 'wavefile';
@@ -53,11 +54,33 @@ CONVERSATION RULES:
 5. If a user says they didn't receive a message, use 'checkServiceStatus' to see if the system is configured correctly.
 6. Always confirm contact information clearly before sending a follow-up.
 7. IMPORTANT: If the user types their contact info in the text box, acknowledge it and call 'sendFollowUp'.
+8. Use 'bookAppointment' to schedule meetings or site visits for the business owner. Always confirm the date and time with the user before booking.
 
 Goal: Provide expert advice on DrisaTech products with a rhythmic Nigerian flair in the user's language of choice.`;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// --- Google Calendar OAuth Setup ---
+const oauth2Client = new google.auth.OAuth2(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+  process.env.GOOGLE_REDIRECT_URI || `${process.env.APP_URL}/auth/google/callback`
+);
+
+async function getGoogleCalendarTokens() {
+  if (!firestore) return null;
+  const doc = await firestore.collection('settings').doc('google_calendar').get();
+  return doc.exists ? doc.data() : null;
+}
+
+async function saveGoogleCalendarTokens(tokens: any) {
+  if (!firestore) return;
+  await firestore.collection('settings').doc('google_calendar').set({
+    ...tokens,
+    updatedAt: new Date().toISOString()
+  });
+}
 
 // --- Helpers ---
 function cleanJson(text: string): string {
@@ -279,6 +302,54 @@ app.post('/api/twilio/voice', (req, res) => {
 });
 
 // --- Vite Middleware for Development ---
+// --- Google Calendar OAuth Routes ---
+app.get('/api/auth/google/status', async (req, res) => {
+  try {
+    const tokens = await getGoogleCalendarTokens();
+    res.json({ connected: !!tokens });
+  } catch (err) {
+    res.json({ connected: false });
+  }
+});
+
+app.get('/api/auth/google/url', (req, res) => {
+  const url = oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    scope: ['https://www.googleapis.com/auth/calendar.events'],
+    prompt: 'consent'
+  });
+  res.json({ url });
+});
+
+app.get('/auth/google/callback', async (req, res) => {
+  const { code } = req.query;
+  try {
+    const { tokens } = await oauth2Client.getToken(code as string);
+    await saveGoogleCalendarTokens(tokens);
+    
+    res.send(`
+      <html>
+        <body style="font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; background: #f4f4f4;">
+          <div style="background: white; padding: 2rem; border-radius: 1rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center;">
+            <h1 style="color: #10b981;">Connection Successful!</h1>
+            <p>Google Calendar is now connected to Drisa AI.</p>
+            <p>You can close this window now.</p>
+            <script>
+              if (window.opener) {
+                window.opener.postMessage({ type: 'GOOGLE_AUTH_SUCCESS' }, '*');
+                setTimeout(() => window.close(), 2000);
+              }
+            </script>
+          </div>
+        </body>
+      </html>
+    `);
+  } catch (err) {
+    console.error('[Google Auth] Error exchanging code:', err);
+    res.status(500).send('Authentication failed');
+  }
+});
+
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -442,6 +513,32 @@ async function startServer() {
                   parameters: {
                     type: Type.OBJECT,
                     properties: {}
+                  }
+                },
+                {
+                  name: "bookAppointment",
+                  description: "Schedule a meeting or site visit for the business owner. Always confirm the date and time with the user before booking.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      summary: {
+                        type: Type.STRING,
+                        description: "The title of the appointment (e.g., 'Solar Installation Site Visit')."
+                      },
+                      description: {
+                        type: Type.STRING,
+                        description: "Additional details about the appointment, including customer name and contact info."
+                      },
+                      startTime: {
+                        type: Type.STRING,
+                        description: "The start time of the appointment in ISO 8601 format (e.g., '2026-03-15T10:00:00Z')."
+                      },
+                      endTime: {
+                        type: Type.STRING,
+                        description: "The end time of the appointment in ISO 8601 format (e.g., '2026-03-15T11:00:00Z')."
+                      }
+                    },
+                    required: ["summary", "startTime", "endTime"]
                   }
                 }
               ]
@@ -657,6 +754,7 @@ async function startServer() {
                     const finalResult = contactType === 'whatsapp' ? whatsappResult : emailResult;
                     return { id: call.id, name: call.name, response: { result: finalResult } };
                   } else if (call.name === 'checkServiceStatus') {
+                    const googleCalendarTokens = await getGoogleCalendarTokens();
                     const status = {
                       whatsapp: {
                         configured: !!(process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID),
@@ -665,9 +763,44 @@ async function startServer() {
                       email: {
                         configured: !!(process.env.SMTP_USER && process.env.SMTP_PASS),
                         details: process.env.SMTP_USER ? `User: ${process.env.SMTP_USER}` : "Credentials missing"
+                      },
+                      googleCalendar: {
+                        configured: !!googleCalendarTokens,
+                        details: googleCalendarTokens ? "Connected" : "Not Connected"
                       }
                     };
                     return { id: call.id, name: call.name, response: { result: status } };
+                  } else if (call.name === 'bookAppointment') {
+                    const { summary, description, startTime, endTime } = call.args as any;
+                    console.log(`[Calendar Tool] Booking appointment: ${summary} at ${startTime}`);
+                    
+                    try {
+                      const tokens = await getGoogleCalendarTokens();
+                      if (!tokens) {
+                        return { id: call.id, name: call.name, response: { error: "Google Calendar is not connected. Please ask the admin to connect it in the dashboard." } };
+                      }
+                      
+                      oauth2Client.setCredentials(tokens);
+                      const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+                      
+                      const event = {
+                        summary,
+                        description,
+                        start: { dateTime: startTime },
+                        end: { dateTime: endTime },
+                      };
+                      
+                      const response = await calendar.events.insert({
+                        calendarId: 'primary',
+                        requestBody: event,
+                      });
+                      
+                      console.log(`[Calendar Tool] Event created: ${response.data.htmlLink}`);
+                      return { id: call.id, name: call.name, response: { success: true, link: response.data.htmlLink } };
+                    } catch (err) {
+                      console.error('[Calendar Tool] Error booking appointment:', err);
+                      return { id: call.id, name: call.name, response: { error: "Failed to book appointment: " + (err instanceof Error ? err.message : String(err)) } };
+                    }
                   }
                   return { id: call.id, name: call.name, response: { error: "Unknown function" } };
                 }));

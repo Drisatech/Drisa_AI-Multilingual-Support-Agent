@@ -51,6 +51,19 @@
         "features": { "type": "array", "items": { "type": "string" } }
       },
       "required": ["id", "name", "price"]
+    },
+    "CalendarConfig": {
+      "title": "CalendarConfig",
+      "description": "OAuth tokens and settings for Google Calendar integration.",
+      "type": "object",
+      "properties": {
+        "access_token": { "type": "string" },
+        "refresh_token": { "type": "string" },
+        "scope": { "type": "string" },
+        "token_type": { "type": "string" },
+        "expiry_date": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
     }
   },
   "firestore": {
@@ -65,6 +78,10 @@
     "/products/{productId}": {
       "schema": "Product",
       "description": "Product catalog data"
+    },
+    "/settings/{settingId}": {
+      "schema": "CalendarConfig",
+      "description": "Global application settings (e.g., google_calendar)"
     }
   }
 }

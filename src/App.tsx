@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import { Product, FollowUp } from './types';
 import { useLiveAgent } from './hooks/useLiveAgent';
-import { Mic, MicOff, Phone, PhoneOff, Package, MessageSquare, Settings, Activity, Sun, Moon, BookOpen, LogIn, LogOut, Globe, FileText, Plus, Trash2, Send } from 'lucide-react';
+import { Mic, MicOff, Phone, PhoneOff, Package, MessageSquare, Settings, Activity, Sun, Moon, BookOpen, LogIn, LogOut, Globe, FileText, Plus, Trash2, Send, Calendar, CheckCircle2 } from 'lucide-react';
 import { auth, signInWithGoogle, db as fdb, getRedirectResult } from './firebase';
 import { onAuthStateChanged, User, signOut } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'agent' | 'kb' | 'sessions' | 'leads'>('agent');
+  const [activeTab, setActiveTab] = useState<'agent' | 'kb' | 'sessions' | 'leads' | 'settings'>('agent');
+  const [isCalendarConnected, setIsCalendarConnected] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [isWidgetMode, setIsWidgetMode] = useState(false);
   const [preferredLanguage, setPreferredLanguage] = useState('English');
@@ -146,6 +147,34 @@ export default function App() {
     }
   }, [isAdmin, activeTab]);
 
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'GOOGLE_AUTH_SUCCESS') {
+        setIsCalendarConnected(true);
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
+  useEffect(() => {
+    if (isAdmin) {
+      fetch('/api/auth/google/status')
+        .then(res => res.json())
+        .then(data => setIsCalendarConnected(data.connected))
+        .catch(err => console.error('Failed to check calendar status:', err));
+    }
+  }, [isAdmin]);
+
+  const handleConnectGoogleCalendar = async () => {
+    try {
+      const res = await fetch('/api/auth/google/url');
+      const { url } = await res.json();
+      window.open(url, 'google_auth', 'width=600,height=700');
+    } catch (err) {
+      console.error('Failed to get Google Auth URL:', err);
+    }
+  };
   const handleAddSource = async (type: 'url' | 'article') => {
     if (!isAdmin || !fdb) return;
     setIsProcessing(true);
@@ -235,6 +264,13 @@ export default function App() {
                 >
                   <Package className="w-5 h-5" />
                   Leads & Follow-ups
+                </button>
+                <button 
+                  onClick={() => setActiveTab('settings')}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'settings' ? (darkMode ? 'bg-brand-primary text-white' : 'bg-brand-secondary text-white') : 'hover:bg-white/10'}`}
+                >
+                  <Settings className="w-5 h-5" />
+                  Settings
                 </button>
               </>
             )}
@@ -705,6 +741,50 @@ export default function App() {
               {sessions.length === 0 && (
                 <div className="text-center py-12 text-zinc-400">No sessions logged yet.</div>
               )}
+            </div>
+          </div>
+        )}
+        {activeTab === 'settings' && isAdmin && (
+          <div className="max-w-5xl mx-auto">
+            <div className="mb-8">
+              <h2 className={`text-3xl font-semibold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>Settings</h2>
+              <p className={`${darkMode ? 'text-white/60' : 'text-zinc-500'} mt-2`}>Configure integrations and agent behavior.</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className={`p-6 rounded-2xl border transition-colors duration-300 ${darkMode ? 'bg-brand-secondary border-white/10' : 'bg-white border-zinc-200'}`}>
+                <div className="flex items-center gap-3 mb-4">
+                  <Calendar className="w-5 h-5 text-brand-primary" />
+                  <h3 className={`font-semibold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>Google Calendar</h3>
+                </div>
+                <p className={`text-sm mb-6 ${darkMode ? 'text-white/60' : 'text-zinc-500'}`}>
+                  Connect your Google Calendar to allow the AI agent to book appointments and site visits directly.
+                </p>
+                
+                {isCalendarConnected ? (
+                  <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                    <div>
+                      <div className="text-sm font-bold text-emerald-500 uppercase tracking-wider">Connected</div>
+                      <div className={`text-xs ${darkMode ? 'text-emerald-500/70' : 'text-emerald-600'}`}>The AI can now book appointments.</div>
+                    </div>
+                    <button 
+                      onClick={handleConnectGoogleCalendar}
+                      className="ml-auto text-[10px] font-bold uppercase tracking-wider text-emerald-500 underline hover:no-underline"
+                    >
+                      Reconnect
+                    </button>
+                  </div>
+                ) : (
+                  <button 
+                    onClick={handleConnectGoogleCalendar}
+                    className="w-full py-3 bg-brand-primary text-white rounded-xl font-medium hover:bg-brand-primary/90 transition-all flex items-center justify-center gap-2"
+                  >
+                    <Calendar className="w-4 h-4" />
+                    Connect Google Calendar
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}
