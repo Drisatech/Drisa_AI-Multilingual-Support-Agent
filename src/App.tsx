@@ -169,10 +169,15 @@ export default function App() {
   const handleConnectGoogleCalendar = async () => {
     try {
       const res = await fetch('/api/auth/google/url');
-      const { url } = await res.json();
-      window.open(url, 'google_auth', 'width=600,height=700');
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to get Google Auth URL');
+        return;
+      }
+      window.open(data.url, 'google_auth', 'width=600,height=700');
     } catch (err) {
       console.error('Failed to get Google Auth URL:', err);
+      alert('An unexpected error occurred while connecting to Google Calendar.');
     }
   };
   const handleAddSource = async (type: 'url' | 'article') => {

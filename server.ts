@@ -330,6 +330,13 @@ app.get('/api/auth/google/status', async (req, res) => {
 });
 
 app.get('/api/auth/google/url', (req, res) => {
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    console.error('Missing Google OAuth environment variables: GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET');
+    return res.status(500).json({ 
+      error: 'Google OAuth is not configured. Please add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to the app settings.' 
+    });
+  }
+
   const redirectUri = getRedirectUri(req);
   const client = getOAuth2Client(req);
 
