@@ -127,6 +127,53 @@ Experience Drisa_AI live through the following portals:
 
 ---
 
+## 🔌 Integration & Embedding
+
+You can easily integrate Drisa_AI into any website, including **WordPress**, **Wix**, **Shopify**, or custom-built platforms.
+
+### 1. Universal Embed Script (Floating Widget)
+Copy and paste this code before the closing `</body>` tag of your website. By default, it appears at the **bottom-right** by default.
+
+```html
+<script 
+  src="https://drisa-ai-agent-448742322230.us-central1.run.app/embed.js" 
+  data-mode="widget"
+  data-position="bottom-right"
+  async>
+</script>
+```
+
+**Customization Options:**
+- `data-position`: Change to `bottom-left`, `top-right`, or `top-left`.
+- `data-mode`: Set to `widget` for the floating assistant.
+
+### 2. Inline Placement (Specific Section)
+If you want the agent to appear inside a specific section of your page (e.g., a "Contact Us" div), use the `data-container` attribute:
+
+```html
+<!-- 1. Create a container with a unique ID -->
+<div id="drisa-ai-container"></div>
+
+<!-- 2. Add the script with the data-container attribute -->
+<script 
+  src="https://drisa-ai-agent-448742322230.us-central1.run.app/embed.js" 
+  data-container="drisa-ai-container"
+  async>
+</script>
+```
+
+### 3. WordPress Integration
+To add Drisa_AI to your WordPress site:
+1.  Log in to your **WordPress Admin Dashboard**.
+2.  Install a plugin like **"Insert Headers and Footers"** (WPCode).
+3.  Go to **Code Snippets** -> **Header & Footer**.
+4.  Paste the **Universal Embed Script** into the **Footer** section.
+5.  Click **Save Changes**.
+
+Alternatively, you can add it to your theme's `footer.php` file just before the `<?php wp_footer(); ?>` tag.
+
+---
+
 ## 👨‍💻 About Me
 
 ### 🧠 Aliyu Idris Adeiza
