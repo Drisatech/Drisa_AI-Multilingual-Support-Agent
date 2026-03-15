@@ -429,15 +429,9 @@ async function startServer() {
   } else {
     const distPath = path.resolve(process.cwd(), 'dist');
     console.log(`[Server] Production mode. Serving static files from: ${distPath}`);
-    if (fs.existsSync(distPath)) {
-      const contents = fs.readdirSync(distPath);
-      console.log(`[Server] dist folder exists. Contents: ${contents.join(', ')}`);
-    } else {
-      console.error(`[Server] ERROR: dist folder NOT FOUND at ${distPath}`);
-    }
-    app.use(express.static(distPath));
-
-    // Explicit route for the agent identity image to ensure it's served correctly in production
+    
+    // Explicit route for the agent identity image - MOVED ABOVE express.static
+    // to ensure it's handled with correct headers and priority
     app.get('/agent-identity.png', (req, res) => {
       const possiblePaths = [
         path.resolve(distPath, 'agent-identity.png'),
@@ -449,8 +443,9 @@ async function startServer() {
       
       for (const imgPath of possiblePaths) {
         if (fs.existsSync(imgPath)) {
-          console.log(`[Server] Image found at: ${imgPath}. Sending...`);
+          console.log(`[Server] Image found at: ${imgPath}. Sending with Cache-Control.`);
           res.setHeader('Content-Type', 'image/png');
+          res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
           return res.sendFile(imgPath);
         }
       }
@@ -458,6 +453,14 @@ async function startServer() {
       console.error(`[Server] ERROR: Image NOT FOUND in any of: ${possiblePaths.join(', ')}`);
       res.status(404).send('Agent identity image not found');
     });
+
+    if (fs.existsSync(distPath)) {
+      const contents = fs.readdirSync(distPath);
+      console.log(`[Server] dist folder exists. Contents: ${contents.join(', ')}`);
+    } else {
+      console.error(`[Server] ERROR: dist folder NOT FOUND at ${distPath}`);
+    }
+    app.use(express.static(distPath));
 
     app.get('*', (req, res) => {
       const indexPath = path.join(distPath, 'index.html');
