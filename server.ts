@@ -31,7 +31,11 @@ try {
 
 const app = express();
 app.set('trust proxy', true);
-const PORT = 3000;
+
+// In AI Studio, we MUST listen on port 3000.
+// In external Cloud Run, we MUST listen on the port provided by the PORT environment variable (usually 8080).
+// We detect AI Studio by the presence of the APP_URL environment variable.
+const PORT = (process.env.APP_URL) ? 3000 : (Number(process.env.PORT) || 8080);
 
 const SYSTEM_INSTRUCTION = `You are Drisa, a professional Nigerian AI Sales & Support Agent for DrisaTech (https://drisatech.com.ng).
 
@@ -413,16 +417,24 @@ async function startServer() {
 
     // Explicit route for the agent identity image to ensure it's served correctly in production
     app.get('/agent-identity.png', (req, res) => {
-      const imagePath = path.resolve(distPath, 'agent-identity.png');
-      console.log(`[Server] Request for /agent-identity.png. Absolute path: ${imagePath}`);
-      if (fs.existsSync(imagePath)) {
-        console.log(`[Server] Image found. Sending with image/png type.`);
-        res.setHeader('Content-Type', 'image/png');
-        res.sendFile(imagePath);
-      } else {
-        console.error(`[Server] ERROR: Image NOT FOUND at ${imagePath}`);
-        res.status(404).send('Agent identity image not found');
+      const possiblePaths = [
+        path.resolve(distPath, 'agent-identity.png'),
+        path.resolve(process.cwd(), 'public', 'agent-identity.png'),
+        path.resolve(process.cwd(), 'agent-identity.png')
+      ];
+      
+      console.log(`[Server] Request for /agent-identity.png. Checking possible paths...`);
+      
+      for (const imgPath of possiblePaths) {
+        if (fs.existsSync(imgPath)) {
+          console.log(`[Server] Image found at: ${imgPath}. Sending...`);
+          res.setHeader('Content-Type', 'image/png');
+          return res.sendFile(imgPath);
+        }
       }
+      
+      console.error(`[Server] ERROR: Image NOT FOUND in any of: ${possiblePaths.join(', ')}`);
+      res.status(404).send('Agent identity image not found');
     });
 
     app.get('*', (req, res) => {
