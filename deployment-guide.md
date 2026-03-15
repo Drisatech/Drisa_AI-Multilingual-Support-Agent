@@ -34,6 +34,7 @@ Drisa_AI relies on secure environment variables. For production, these should be
 | `GOOGLE_CLIENT_ID` | OAuth 2.0 Client ID for Google Calendar. |
 | `GOOGLE_CLIENT_SECRET` | OAuth 2.0 Client Secret for Google Calendar. |
 | `SMTP_USER` / `SMTP_PASS` | Credentials for automated email follow-ups. |
+| `APP_URL` | The public URL of your application (used for email notification links). |
 
 ---
 

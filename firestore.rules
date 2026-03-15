@@ -31,7 +31,7 @@ service cloud.firestore {
       return isAuthenticated() && 
         (
           (request.auth.token.email == "drisatech@gmail.com" && request.auth.token.email_verified == true) ||
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
         );
     }
 
@@ -39,9 +39,18 @@ service cloud.firestore {
       return request.resource.data[field] is string && request.resource.data[field].size() <= maxLen;
     }
 
-    // Users: Users can read/write their own profile, Admin can read/write all
+    // Users: Users can read/write their own profile (except role), Admin can read/write all
     match /users/{userId} {
-      allow read, write: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow create: if isAuthenticated() && request.auth.uid == userId && 
+        request.resource.data.role == 'user' && 
+        (!('requestStatus' in request.resource.data) || request.resource.data.requestStatus == 'none');
+      allow update: if isAuthenticated() && (
+        isAdmin() || 
+        (request.auth.uid == userId && 
+         request.resource.data.role == resource.data.role && 
+         (request.resource.data.requestStatus == 'pending' || request.resource.data.requestStatus == resource.data.requestStatus))
+      );
     }
 
     // Leads: Public can create (for AI capture), Admin can read/write
@@ -77,6 +86,11 @@ service cloud.firestore {
     // Settings: Admin only
     match /settings/{settingId} {
       allow read, write: if isAdmin();
+    }
+
+    // Test connection: Publicly readable
+    match /test/connection {
+      allow read: if true;
     }
 
     // Default deny

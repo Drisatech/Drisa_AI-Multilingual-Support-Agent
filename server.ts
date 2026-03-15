@@ -9,7 +9,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { GoogleGenAI, Modality, Type } from '@google/genai';
 import nodemailer from 'nodemailer';
 import { google } from 'googleapis';
-import { db } from './db.js';
+import { db } from './db.ts';
 import { Firestore } from '@google-cloud/firestore';
 import pkg from 'wavefile';
 const { WaveFile } = pkg;
@@ -99,10 +99,15 @@ TONE & VOICE:
 
 CONVERSATION RULES:
 1. Keep responses VERY CONCISE (1-2 sentences).
-2. Use 'lookupCatalog' for product inquiries.
+2. Use 'lookupCatalog' for product inquiries. If the answer is not in the catalog, you MAY use Google Search to provide general helpful information, but always prioritize DrisaTech products.
 3. Use 'sendFollowUp' to capture contact details and send real messages.
 4. Use 'checkServiceStatus' to see if the system is configured correctly.
 5. Use 'bookAppointment' to schedule meetings or site visits.
+
+IMMEDIATE GREETING RULE:
+- As soon as the session starts, you MUST proactively greet the user warmly.
+- Do not wait for the user to speak first.
+- Introduce yourself as ${agentName} from ${companyName}.
 
 Goal: Provide expert advice on ${companyName} products with a rhythmic Nigerian flair.`,
     defaultLanguage
@@ -204,6 +209,10 @@ function pcmToMulaw(base64Payload: string): string {
 
 // Initialize Database
 db.init();
+
+app.get('/api/test', (req, res) => {
+  res.json({ message: 'Server is alive' });
+});
 
 // Health Check
 app.get('/api/health', (req, res) => {
@@ -532,11 +541,15 @@ app.post('/api/sessions/log', async (req, res) => {
   const { transcript, startTime, endTime, preferredLanguage } = req.body;
   if (firestore) {
     try {
-      await firestore.collection('sessions').add({
+      await firestore.collection('conversations').add({
+        sessionId: `web-${Date.now()}`,
         transcript,
         startTime,
         endTime,
-        preferredLanguage,
+        language: preferredLanguage || 'English',
+        type: 'web',
+        summary: 'Web chat session', // Default summary for web
+        outcome: 'inquiry', // Default outcome for web
         createdAt: new Date().toISOString()
       });
       res.json({ success: true });
@@ -668,14 +681,78 @@ app.get('/auth/google/callback', async (req, res) => {
   }
 });
 
-async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
+app.post('/api/admin/request-notification', async (req, res) => {
+  const { userEmail, userName } = req.body;
+  if (!userEmail) {
+    return res.status(400).json({ error: "Missing user email" });
+  }
+
+  const superAdminEmail = 'drisatech@gmail.com';
+  let emailSettings: any = null;
+
+  if (firestore) {
+    try {
+      const emailDoc = await firestore.collection('settings').doc('email').get();
+      if (emailDoc.exists) emailSettings = emailDoc.data();
+    } catch (e) {
+      console.error('[Firestore] Error fetching email settings for admin notification:', e);
+    }
+  }
+
+  const smtpUser = emailSettings?.user || process.env.SMTP_USER;
+  const smtpPass = emailSettings?.pass || process.env.SMTP_PASS;
+  const smtpHost = emailSettings?.host || process.env.SMTP_HOST || 'smtp.gmail.com';
+  const smtpPort = emailSettings?.port || process.env.SMTP_PORT || '465';
+
+  if (smtpUser && smtpPass) {
+    try {
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: parseInt(smtpPort),
+        secure: true,
+        auth: { user: smtpUser, pass: smtpPass },
+      });
+
+      await transporter.sendMail({
+        from: `"Drisa AI System" <${smtpUser}>`,
+        to: superAdminEmail,
+        subject: "New Admin Access Request - Drisa AI",
+        html: `
+          <div style="font-family: sans-serif; padding: 20px; color: #333;">
+            <h2 style="color: #8b5cf6;">New Admin Access Request</h2>
+            <p>A user has requested sub-admin access to the Drisa AI Dashboard.</p>
+            <div style="background: #f3f4f6; padding: 15px; rounded: 10px; margin: 20px 0;">
+              <p><strong>Name:</strong> ${userName || 'N/A'}</p>
+              <p><strong>Email:</strong> ${userEmail}</p>
+              <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
+            </div>
+            <p>Please log in to the dashboard to approve or reject this request.</p>
+            <a href="${process.env.APP_URL || '#'}" style="display: inline-block; background: #8b5cf6; color: white; padding: 10px 20px; text-decoration: none; border-radius: 8px; margin-top: 10px;">Go to Dashboard</a>
+          </div>
+        `,
+      });
+      res.json({ success: true });
+    } catch (err) {
+      console.error('[SMTP] Admin notification failed:', err);
+      res.status(500).json({ error: 'Failed to send email notification' });
+    }
   } else {
+    res.status(500).json({ error: 'Email credentials not configured' });
+  }
+});
+
+async function startServer() {
+  console.log('[Server] startServer() called');
+  try {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[Server] Initializing Vite middleware...');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+      console.log('[Server] Vite middleware initialized');
+    } else {
     const distPath = path.resolve(process.cwd(), 'dist');
     const publicPath = path.resolve(process.cwd(), 'public');
     console.log(`[Server] Production mode.`);
@@ -773,9 +850,11 @@ async function startServer() {
             systemInstruction: instruction,
             outputAudioTranscription: {},
             inputAudioTranscription: {},
-            tools: [{
-              functionDeclarations: [
-                { name: "lookupCatalog", parameters: { type: Type.OBJECT, properties: { query: { type: Type.STRING } } } },
+            tools: [
+              { googleSearch: {} },
+              {
+                functionDeclarations: [
+                  { name: "lookupCatalog", parameters: { type: Type.OBJECT, properties: { query: { type: Type.STRING } } } },
                 { name: "sendFollowUp", parameters: { type: Type.OBJECT, properties: { contactType: { type: Type.STRING }, contactAddress: { type: Type.STRING }, message: { type: Type.STRING } }, required: ["contactType", "contactAddress", "message"] } },
                 { name: "checkServiceStatus", parameters: { type: Type.OBJECT, properties: {} } },
                 { name: "bookAppointment", parameters: { type: Type.OBJECT, properties: { summary: { type: Type.STRING }, description: { type: Type.STRING }, startTime: { type: Type.STRING }, endTime: { type: Type.STRING } }, required: ["summary", "startTime", "endTime"] } }
@@ -787,7 +866,7 @@ async function startServer() {
               console.log('[Twilio] Gemini session opened');
               // Initial greeting for phone call
               geminiSession.sendRealtimeInput({
-                parts: [{ text: `Introduce yourself briefly as the DrisaTech AI Support Agent and ask how you can help. Please greet the user in ${defaultLanguage}.` }]
+                parts: [{ text: `Hello! Please introduce yourself briefly as the DrisaTech AI Support Agent and ask how you can help. Greet the user warmly in ${defaultLanguage}.` }]
               });
             },
             onmessage: async (msg) => {
@@ -831,7 +910,6 @@ async function startServer() {
           }
         });
 
-        geminiSession.sendRealtimeInput({ parts: [{ text: "Introduce yourself briefly as the DrisaTech AI Support Agent and ask how you can help." }] });
       } else if (data.event === 'media' && geminiSession) {
         const pcm16 = mulawToPcm16(data.media.payload);
         if (pcm16) geminiSession.sendRealtimeInput({ media: { data: pcm16, mimeType: 'audio/pcm;rate=16000' } });
@@ -895,6 +973,13 @@ async function startServer() {
       }
     });
   });
+} catch (err) {
+    console.error('[Server] Error in startServer:', err);
+    throw err;
+  }
 }
 
-startServer();
+startServer().catch(err => {
+  console.error('[Server] FATAL ERROR during startup:', err);
+  process.exit(1);
+});

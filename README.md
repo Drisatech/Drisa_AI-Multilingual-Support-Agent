@@ -43,6 +43,7 @@ graph TD
 
     subgraph Data_Persistence [Data Persistence]
         I[(Google Firestore)]
+        M[Admin Request Flow]
     end
 
     subgraph External_Integrations [External Integrations]
@@ -65,6 +66,9 @@ graph TD
     F --> J
     F --> K
     F --> L
+
+    B -->|Admin Request| M
+    M -->|Email Alert| L
 ```
 
 ### 🔄 Workflow Overview
@@ -82,6 +86,7 @@ graph TD
 *   **Intelligent RAG Catalog**: A semantic search engine that allows the agent to provide expert technical advice on solar, CCTV, and smart home products.
 *   **Enterprise Integrations**: Production-ready connectors for **Google Calendar** (Scheduling), **Meta WhatsApp** (Engagement), and **Nodemailer** (Notifications).
 *   **Admin Command Center**: A robust dashboard for business owners to manage knowledge bases, track leads, and monitor agent performance.
+*   **Admin Request & Approval System**: A secure workflow for testers and sub-admins to request access, with automated email notifications to the super admin for immediate approval.
 *   **Telephony-Ready**: Built-in support for Twilio Media Streams, bridging the gap between modern AI and traditional phone systems.
 
 ---
@@ -102,6 +107,7 @@ Manage your AI workforce through the centralized dashboard:
 
 *   **Knowledge Management**: Upload and process business documents to keep Drisa's knowledge base up-to-date.
 *   **Lead Tracking**: Monitor customer interactions and automated follow-ups in real-time.
+*   **Admin Authorization**: Manage sub-admin access requests with a built-in approval workflow and real-time notifications.
 *   **System Configuration**: Securely manage OAuth connections for Google Calendar and Meta WhatsApp integrations.
 
 ---

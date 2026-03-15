@@ -54,7 +54,7 @@ export const db = {
         const snapshot = await q.where('name', '>=', query).where('name', '<=', query + '\uf8ff').get();
         return snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
       }
-      const snapshot = await q.get();
+      const snapshot = await q.orderBy('updatedAt', 'desc').get();
       return snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
     } else {
       const db = await getSqlite();
@@ -63,20 +63,24 @@ export const db = {
         const searchStr = `%${query}%`;
         return stmt.all(searchStr, searchStr, searchStr);
       }
-      return db.prepare('SELECT * FROM products').all();
+      return db.prepare('SELECT * FROM products ORDER BY id DESC').all();
     }
   },
 
   async addProduct(product: { name: string; description: string; price: number; category: string }) {
+    const data = {
+      ...product,
+      updatedAt: new Date().toISOString()
+    };
     const firestore = getFirestore();
     if (USE_FIRESTORE && firestore) {
-      const docRef = await firestore.collection('products').add(product);
-      return { id: docRef.id, ...product };
+      const docRef = await firestore.collection('products').add(data);
+      return { id: docRef.id, ...data };
     } else {
       const db = await getSqlite();
       const stmt = db.prepare('INSERT INTO products (name, description, price, category) VALUES (?, ?, ?, ?)');
       const info = stmt.run(product.name, product.description, product.price, product.category);
-      return { id: info.lastInsertRowid, ...product };
+      return { id: info.lastInsertRowid, ...data };
     }
   },
 

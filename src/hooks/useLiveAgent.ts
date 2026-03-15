@@ -65,12 +65,17 @@ TONE & VOICE:
 
 CONVERSATION RULES:
 1. Keep responses VERY CONCISE (1-2 sentences).
-2. Use 'lookupCatalog' for product inquiries.
+2. Use 'lookupCatalog' for product inquiries. If the answer is not in the catalog, you MAY use Google Search to provide general helpful information, but always prioritize DrisaTech products.
 3. Use 'sendFollowUp' to capture contact details and send real messages.
 4. Use 'checkServiceStatus' to see if the system is configured correctly.
 5. Use 'bookAppointment' to schedule meetings or site visits.
 
-Goal: Provide expert advice on DrisaTech products with a rhythmic Nigerian flair.`;
+Goal: Provide expert advice on DrisaTech products with a rhythmic Nigerian flair.
+
+IMMEDIATE GREETING RULE:
+- As soon as the session starts, you MUST proactively greet the user warmly.
+- Do not wait for the user to speak first.
+- Introduce yourself as Drisa from DrisaTech.`;
 
 export function useLiveAgent() {
   const [isConnected, setIsConnected] = useState(false);
@@ -127,8 +132,10 @@ export function useLiveAgent() {
           systemInstruction: `${dynamicInstruction}\n\nUser's initial preferred language: ${preferredLanguage}`,
           inputAudioTranscription: {},
           outputAudioTranscription: {},
-          tools: [{
-            functionDeclarations: [
+          tools: [
+            { googleSearch: {} },
+            {
+              functionDeclarations: [
               {
                 name: "lookupCatalog",
                 description: "Search the product catalog.",
@@ -206,7 +213,7 @@ export function useLiveAgent() {
 
             // Initial greeting based on preferred language
             sessionRef.current?.sendRealtimeInput({
-              parts: [{ text: `Introduce yourself briefly as the DrisaTech AI Support Agent and ask how you can help. Please greet the user in ${preferredLanguage}.` }]
+              parts: [{ text: `Hello! Please introduce yourself briefly as the DrisaTech AI Support Agent and ask how you can help. Greet the user warmly in ${preferredLanguage}.` }]
             });
           },
           onmessage: async (message) => {

@@ -73,6 +73,7 @@
         "email": { "type": "string", "format": "email" },
         "role": { "type": "string", "enum": ["admin", "user"] },
         "displayName": { "type": "string" },
+        "requestStatus": { "type": "string", "enum": ["none", "pending", "approved", "rejected"] },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["email", "role"]

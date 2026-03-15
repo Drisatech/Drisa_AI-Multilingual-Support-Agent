@@ -65,6 +65,7 @@ export default function App() {
   const [isWidgetMode, setIsWidgetMode] = useState(false);
   const [preferredLanguage, setPreferredLanguage] = useState('English');
   const [user, setUser] = useState<User | null>(null);
+  const [currentUserData, setCurrentUserData] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -185,15 +186,19 @@ export default function App() {
             const userDoc = await getDoc(doc(fdb, 'users', u.uid));
             if (userDoc.exists()) {
               const data = userDoc.data();
+              setCurrentUserData(data);
               if (data.role === 'admin') setIsAdmin(true);
             } else {
               // Create initial user profile
-              await setDoc(doc(fdb, 'users', u.uid), {
+              const initialData = {
                 email: u.email,
                 displayName: u.displayName,
                 role: isSuperAdmin ? 'admin' : 'user',
+                requestStatus: 'none',
                 updatedAt: serverTimestamp()
-              });
+              };
+              await setDoc(doc(fdb, 'users', u.uid), initialData);
+              setCurrentUserData(initialData);
             }
           } catch (err) {
             console.error("Error fetching user role:", err);
@@ -201,6 +206,7 @@ export default function App() {
         }
       } else {
         setIsAdmin(false);
+        setCurrentUserData(null);
       }
       setIsAuthLoading(false);
     }) : () => { setIsAuthLoading(false); };
@@ -348,7 +354,7 @@ export default function App() {
       };
       fetchSettings();
     }
-  }, [isAdmin, activeTab]);
+  }, [isAdmin, activeTab, fdb]);
 
   const handleSaveWhatsappSettings = async () => {
     if (!fdb || !isAdmin) return;
@@ -436,6 +442,37 @@ export default function App() {
     } catch (err) {
       console.error('Failed to get Google Auth URL:', err);
       alert('An unexpected error occurred while connecting to Google Calendar.');
+    }
+  };
+
+  const handleRequestAdmin = async () => {
+    if (!user || !fdb) return;
+    try {
+      await updateDoc(doc(fdb, 'users', user.uid), {
+        requestStatus: 'pending',
+        updatedAt: serverTimestamp()
+      });
+      setCurrentUserData((prev: any) => ({ ...prev, requestStatus: 'pending' }));
+      
+      // Send email notification to super admin
+      try {
+        await fetch('/api/admin/request-notification', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userEmail: user.email,
+            userName: user.displayName
+          })
+        });
+      } catch (emailErr) {
+        console.error("Failed to send admin notification email:", emailErr);
+        // We don't alert the user here as the request was still saved in Firestore
+      }
+
+      alert("Request sent! The super admin will review your access shortly.");
+    } catch (err) {
+      console.error("Failed to request admin access:", err);
+      alert("Failed to send request. Please try again.");
     }
   };
   const handleAddSource = async (type: 'url' | 'article') => {
@@ -570,10 +607,17 @@ export default function App() {
                     setActiveTab('users');
                     setIsMobileMenuOpen(false);
                   }}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'users' ? (darkMode ? 'bg-brand-primary text-white' : 'bg-brand-secondary text-white') : 'hover:bg-white/10'}`}
+                  className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'users' ? (darkMode ? 'bg-brand-primary text-white' : 'bg-brand-secondary text-white') : 'hover:bg-white/10'}`}
                 >
-                  <Users className="w-5 h-5" />
-                  Authorized Users
+                  <div className="flex items-center gap-3">
+                    <Users className="w-5 h-5" />
+                    Authorized Users
+                  </div>
+                  {usersList.filter(u => u.requestStatus === 'pending' && u.role !== 'admin').length > 0 && (
+                    <span className="w-5 h-5 rounded-full bg-red-500 text-[10px] font-bold flex items-center justify-center text-white animate-pulse">
+                      {usersList.filter(u => u.requestStatus === 'pending' && u.role !== 'admin').length}
+                    </span>
+                  )}
                 </button>
                 <button 
                   onClick={() => {
@@ -599,9 +643,23 @@ export default function App() {
                 <div className="px-4 py-2 text-xs text-white/50 truncate">
                   Logged in as: <span className="text-white/80">{user.email}</span>
                   {!isAdmin && (
-                    <div className="text-amber-400 mt-2 p-2 bg-amber-400/10 border border-amber-400/20 rounded-lg">
-                      <p className="font-bold">Access Restricted</p>
-                      <p className="opacity-80 text-[10px]">Your account needs admin authorization from the super admin.</p>
+                    <div className="text-amber-400 mt-2 p-3 bg-amber-400/10 border border-amber-400/20 rounded-xl">
+                      <p className="font-bold text-sm">Access Restricted</p>
+                      <p className="opacity-80 text-[10px] mb-3">Your account needs admin authorization from the super admin.</p>
+                      
+                      {currentUserData?.requestStatus === 'pending' ? (
+                        <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-amber-500 bg-amber-500/10 p-2 rounded-lg border border-amber-500/20">
+                          <Activity className="w-3 h-3 animate-spin" />
+                          Request Pending...
+                        </div>
+                      ) : (
+                        <button 
+                          onClick={handleRequestAdmin}
+                          className="w-full py-2 bg-amber-500 text-brand-secondary text-[10px] font-bold uppercase tracking-wider rounded-lg hover:bg-amber-400 transition-all"
+                        >
+                          Request Admin Access
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1028,25 +1086,32 @@ export default function App() {
                   </div>
                   
                   <div className="flex items-center gap-3">
-                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border ${
-                      u.role === 'admin' ? 'border-purple-500/50 text-purple-500 bg-purple-500/10' : 'border-zinc-500/50 text-zinc-500 bg-zinc-500/10'
-                    }`}>
-                      {u.role}
-                    </span>
+                    <div className="flex flex-col items-end mr-2">
+                      <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border ${
+                        u.role === 'admin' ? 'border-purple-500/50 text-purple-500 bg-purple-500/10' : 'border-zinc-500/50 text-zinc-500 bg-zinc-500/10'
+                      }`}>
+                        {u.role}
+                      </span>
+                      {u.requestStatus === 'pending' && u.role !== 'admin' && (
+                        <span className="text-[9px] font-bold text-red-500 mt-1 animate-pulse">PENDING REQUEST</span>
+                      )}
+                    </div>
                     
                     {u.email?.toLowerCase() !== 'drisatech@gmail.com' && (
                       <button 
                         onClick={async () => {
                           if (fdb) {
                             const newRole = u.role === 'admin' ? 'user' : 'admin';
-                            await updateDoc(doc(fdb, 'users', u.id), { role: newRole });
+                            const updateData: any = { role: newRole };
+                            if (newRole === 'admin') updateData.requestStatus = 'approved';
+                            await updateDoc(doc(fdb, 'users', u.id), updateData);
                           }
                         }}
                         className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${
                           u.role === 'admin' ? 'bg-zinc-500/10 text-zinc-500 hover:bg-zinc-500/20' : 'bg-purple-500 text-white hover:bg-purple-600'
                         }`}
                       >
-                        {u.role === 'admin' ? 'Revoke Admin' : 'Make Admin'}
+                        {u.role === 'admin' ? 'Revoke Admin' : u.requestStatus === 'pending' ? 'Approve Request' : 'Make Admin'}
                       </button>
                     )}
                     
