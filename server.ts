@@ -13,35 +13,17 @@ import { db } from './db.js';
 import { Firestore } from '@google-cloud/firestore';
 import pkg from 'wavefile';
 const { WaveFile } = pkg;
+import firebaseConfig from './firebase-applet-config.json' assert { type: 'json' };
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load Firebase configuration safely
-let firebaseConfig: any = {};
-try {
-  const configPath = path.resolve(__dirname, 'firebase-applet-config.json');
-  if (fs.existsSync(configPath)) {
-    firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    console.log('[Server] Firebase config loaded successfully');
-  } else {
-    console.warn('[Server] WARNING: firebase-applet-config.json not found. Using empty config.');
-  }
-} catch (err) {
-  console.error('[Server] ERROR loading firebase-applet-config.json:', err);
-}
-
 let firestore: Firestore;
 try {
-  if (firebaseConfig.projectId) {
-    firestore = new Firestore({
-      projectId: firebaseConfig.projectId,
-      databaseId: firebaseConfig.firestoreDatabaseId
-    });
-    console.log('[Server] Firestore initialized');
-  } else {
-    console.warn('[Server] WARNING: No Firestore project ID found. Firestore disabled.');
-    firestore = null as any;
-  }
+  firestore = new Firestore({
+    projectId: firebaseConfig.projectId,
+    databaseId: firebaseConfig.firestoreDatabaseId
+  });
 } catch (e) {
   console.error("Firestore initialization failed:", e);
   firestore = null as any;
@@ -49,33 +31,26 @@ try {
 
 const app = express();
 app.set('trust proxy', true);
-
-// In AI Studio, we MUST listen on port 3000.
-// In external Cloud Run, we MUST listen on the port provided by the PORT environment variable (usually 8080).
-// We detect AI Studio by the presence of the APPLET_ID environment variable.
-const PORT = (process.env.APPLET_ID) ? 3000 : (Number(process.env.PORT) || 8080);
-
-console.log(`[Server] Starting up...`);
-console.log(`[Server] Environment: ${process.env.NODE_ENV}`);
-console.log(`[Server] PORT: ${PORT} (Source: ${process.env.APPLET_ID ? 'AI Studio Override' : (process.env.PORT ? 'Env Var' : 'Default')})`);
+const PORT = Number(process.env.PORT) || 3000;
 
 const SYSTEM_INSTRUCTION = `You are Drisa, a professional Nigerian AI Sales & Support Agent for DrisaTech (https://drisatech.com.ng).
 
 LANGUAGE & MULTILINGUAL RULES:
-- You are fluent in English, Hausa, Igbo, Yoruba, and Nigerian Pidgin.
-- CRITICAL: You MUST respond in the EXACT SAME language the user is speaking. If they speak Hausa, you respond in Hausa. If they speak Igbo, you respond in Igbo. If they speak Yoruba, you respond in Yoruba. If they speak Nigerian Pidgin, you respond in Nigerian Pidgin.
-- You have a native-level understanding of Nigerian accents and dialects.
-- If the user switches languages mid-conversation, you MUST switch with them immediately and seamlessly.
-- For the initial greeting, use a warm, multilingual Nigerian approach if the preferred language is not strictly specified.
+- You are exceptionally fluent in English, Hausa, Igbo, Yoruba, and Nigerian Pidgin.
+- DYNAMIC LANGUAGE DETECTION: You MUST automatically detect the language spoken by the caller and respond in that EXACT same language immediately.
+- ACCENT SENSITIVITY: You are highly skilled at understanding various Nigerian accents and dialects across all supported languages, including regional variations in Hausa, Igbo, Yoruba, and Pidgin.
+- If the user speaks Hausa, you respond in Hausa. If they speak Igbo, you respond in Igbo. If they speak Yoruba, you respond in Yoruba. If they speak Nigerian Pidgin, you respond in Nigerian Pidgin.
+- CODE-SWITCHING: If the user mixes languages (e.g., English and Yoruba), you should respond in a way that feels natural, matching their linguistic style while maintaining professionalism.
+- If the user switches languages mid-conversation, you MUST switch with them instantly without hesitation.
 
 TONE & VOICE:
 - Speak with a warm, respectful, and rhythmic Nigerian professional tone.
 - Use polite Nigerian English honorifics like "Sir" or "Ma" when appropriate.
-- Your cadence should be engaging, helpful, and clear.
-- When speaking Nigerian Pidgin, Hausa, Igbo, or Yoruba, be authentic, natural, and friendly.
+- Your cadence should be engaging, helpful, and clear, reflecting the warmth of Nigerian hospitality.
+- When speaking Nigerian Pidgin, Hausa, Igbo, or Yoruba, be authentic, natural, and friendly. Avoid sounding like a robotic translator.
 
 CONVERSATION RULES:
-1. Keep responses VERY CONCISE (1-2 sentences) to reduce latency and keep the flow natural.
+1. Keep responses VERY CONCISE (1-2 sentences) to ensure extremely low latency and keep the flow natural for a phone call.
 2. If you need to look up information, tell the user: "Just a moment while I check that for you, Sir/Ma."
 3. Use 'lookupCatalog' for product inquiries. If the catalog is empty, use your knowledge of DrisaTech (Solar, CCTV, Smart Home).
 4. Use 'sendFollowUp' to capture contact details and send real messages. You MUST call this tool as soon as the user provides their email or WhatsApp number.
@@ -84,7 +59,7 @@ CONVERSATION RULES:
 7. IMPORTANT: If the user types their contact info in the text box, acknowledge it and call 'sendFollowUp'.
 8. Use 'bookAppointment' to schedule meetings or site visits for the business owner. Always confirm the date and time with the user before booking.
 
-Goal: Provide expert advice on DrisaTech products with a rhythmic Nigerian flair in the user's language of choice.`;
+Goal: Provide expert advice on DrisaTech products with a rhythmic Nigerian flair in whatever language the user chooses to speak.`;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -427,41 +402,8 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.resolve(process.cwd(), 'dist');
-    console.log(`[Server] Production mode. Serving static files from: ${distPath}`);
-    
-    // Explicit route for the agent identity image - MOVED ABOVE express.static
-    // to ensure it's handled with correct headers and priority
-    app.get('/agent-identity.png', (req, res) => {
-      const possiblePaths = [
-        path.resolve(distPath, 'agent-identity.png'),
-        path.resolve(process.cwd(), 'public', 'agent-identity.png'),
-        path.resolve(process.cwd(), 'agent-identity.png')
-      ];
-      
-      console.log(`[Server] Request for /agent-identity.png. Checking possible paths...`);
-      
-      for (const imgPath of possiblePaths) {
-        if (fs.existsSync(imgPath)) {
-          console.log(`[Server] Image found at: ${imgPath}. Sending with Cache-Control.`);
-          res.setHeader('Content-Type', 'image/png');
-          res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
-          return res.sendFile(imgPath);
-        }
-      }
-      
-      console.error(`[Server] ERROR: Image NOT FOUND in any of: ${possiblePaths.join(', ')}`);
-      res.status(404).send('Agent identity image not found');
-    });
-
-    if (fs.existsSync(distPath)) {
-      const contents = fs.readdirSync(distPath);
-      console.log(`[Server] dist folder exists. Contents: ${contents.join(', ')}`);
-    } else {
-      console.error(`[Server] ERROR: dist folder NOT FOUND at ${distPath}`);
-    }
+    const distPath = path.join(__dirname, 'dist');
     app.use(express.static(distPath));
-
     app.get('*', (req, res) => {
       const indexPath = path.join(distPath, 'index.html');
       if (fs.existsSync(indexPath)) {
@@ -569,7 +511,9 @@ async function startServer() {
             speechConfig: {
               voiceConfig: { prebuiltVoiceConfig: { voiceName: "Charon" } },
             },
-            systemInstruction: `${SYSTEM_INSTRUCTION}\n\nIMPORTANT: You are currently in a live audio session. You MUST be highly sensitive to the user's language and accent. If the user speaks in Hausa, Igbo, Yoruba, or Nigerian Pidgin, you MUST respond in that same language immediately. The user's initial preferred language is ${preferredLanguage}, but you should prioritize dynamic switching based on the actual audio input.`,
+            systemInstruction: preferredLanguage === 'English' 
+              ? `${SYSTEM_INSTRUCTION}\n\nNote: The conversation is starting in English, but you MUST be ready to switch to Hausa, Igbo, Yoruba, or Nigerian Pidgin immediately if the user speaks them. Be highly sensitive to Nigerian accents and linguistic nuances.`
+              : `${SYSTEM_INSTRUCTION}\n\nIMPORTANT: The user has selected ${preferredLanguage} as their preferred language. You MUST start the conversation in ${preferredLanguage} and strictly follow the dynamic language switching rules if the user changes language.`,
             inputAudioTranscription: {},
             outputAudioTranscription: {},
             tools: [{
@@ -926,8 +870,10 @@ async function startServer() {
         
         // Send initial greeting trigger
         if (geminiSession) {
-          console.log(`[Gemini] Sending initial greeting trigger. Preferred: ${preferredLanguage}`);
-          const greetingPrompt = `Introduce yourself briefly as the DrisaTech AI Support Agent and ask how you can help. You should greet warmly. If the preferred language is English, you can optionally include a short, friendly Nigerian greeting (like 'Sannu', 'Nnoo', 'E nle', or 'How you dey') to show you are multilingual and ready to help in any language.`;
+          console.log(`[Gemini] Sending initial greeting trigger in ${preferredLanguage}`);
+          const greetingPrompt = preferredLanguage === 'English'
+            ? `Introduce yourself warmly in English as the DrisaTech AI Support Agent. You may include a very brief welcoming greeting in Hausa, Igbo, Yoruba, or Pidgin (e.g., "Sannu", "Kedu", "Ekaabo", or "How far") to show your multilingual capability. Ask how you can help.`
+            : `Introduce yourself briefly in ${preferredLanguage} as the DrisaTech AI Support Agent and ask how you can help. Do not use any other language for this initial greeting.`;
           geminiSession.sendRealtimeInput({ parts: [{ text: greetingPrompt }] });
         }
       } catch (err) {
