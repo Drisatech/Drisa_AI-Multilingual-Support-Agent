@@ -402,11 +402,23 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(__dirname, 'dist');
+    console.log(`[Server] Production mode. Serving static files from: ${distPath}`);
+    if (fs.existsSync(distPath)) {
+      console.log(`[Server] dist folder exists. Contents: ${fs.readdirSync(distPath).join(', ')}`);
+    } else {
+      console.error(`[Server] ERROR: dist folder NOT FOUND at ${distPath}`);
+    }
     app.use(express.static(distPath));
     
-    // Explicit route for the identity image to ensure it's served correctly in production
-    app.get('/identity.png', (req, res) => {
-      res.sendFile(path.join(distPath, 'identity.png'));
+    // Explicit route for the agent identity image to ensure it's served correctly in production
+    app.get('/agent-identity.png', (req, res) => {
+      const imagePath = path.join(distPath, 'agent-identity.png');
+      if (fs.existsSync(imagePath)) {
+        res.setHeader('Content-Type', 'image/png');
+        res.sendFile(imagePath);
+      } else {
+        res.status(404).send('Agent identity image not found');
+      }
     });
 
     app.get('*', (req, res) => {
