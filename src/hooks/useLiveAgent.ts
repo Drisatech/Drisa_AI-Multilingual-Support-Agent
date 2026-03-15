@@ -57,6 +57,7 @@ LANGUAGE & MULTILINGUAL RULES:
 - CRITICAL: You MUST respond in the EXACT SAME language the user is speaking.
 - You have a native-level understanding of Nigerian accents and dialects.
 - If the user switches languages mid-conversation, you MUST switch with them immediately.
+- Your goal is high language accuracy and low latency. Keep responses VERY CONCISE (1-2 sentences).
 
 TONE & VOICE:
 - Speak with a warm, respectful, and rhythmic Nigerian professional tone.
@@ -91,8 +92,19 @@ export function useLiveAgent() {
       setTranscript([]);
       startTimeRef.current = new Date().toISOString();
 
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
+      // Try to get API key from environment first, then from server
+      let apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+        try {
+          const configRes = await fetch('/api/config');
+          const config = await configRes.json();
+          apiKey = config.geminiApiKey;
+        } catch (e) {
+          console.error("Failed to fetch config from server:", e);
+        }
+      }
+
+      if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
         throw new Error("Gemini API Key is missing. Please configure it in the Secrets panel.");
       }
 

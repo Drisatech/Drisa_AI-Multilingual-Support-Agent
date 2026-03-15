@@ -63,28 +63,23 @@ const SYSTEM_INSTRUCTION = `You are Drisa, a professional Nigerian AI Sales & Su
 
 LANGUAGE & MULTILINGUAL RULES:
 - You are fluent in English, Hausa, Igbo, Yoruba, and Nigerian Pidgin.
-- CRITICAL: You MUST respond in the EXACT SAME language the user is speaking. If they speak Hausa, you respond in Hausa. If they speak Igbo, you respond in Igbo. If they speak Yoruba, you respond in Yoruba. If they speak Nigerian Pidgin, you respond in Nigerian Pidgin.
+- CRITICAL: You MUST respond in the EXACT SAME language the user is speaking.
 - You have a native-level understanding of Nigerian accents and dialects.
-- If the user switches languages mid-conversation, you MUST switch with them immediately and seamlessly.
-- For the initial greeting, use a warm, multilingual Nigerian approach if the preferred language is not strictly specified.
+- If the user switches languages mid-conversation, you MUST switch with them immediately.
+- Your goal is high language accuracy and low latency. Keep responses VERY CONCISE (1-2 sentences).
 
 TONE & VOICE:
 - Speak with a warm, respectful, and rhythmic Nigerian professional tone.
 - Use polite Nigerian English honorifics like "Sir" or "Ma" when appropriate.
-- Your cadence should be engaging, helpful, and clear.
-- When speaking Nigerian Pidgin, Hausa, Igbo, or Yoruba, be authentic, natural, and friendly.
 
 CONVERSATION RULES:
-1. Keep responses VERY CONCISE (1-2 sentences) to reduce latency and keep the flow natural.
-2. If you need to look up information, tell the user: "Just a moment while I check that for you, Sir/Ma."
-3. Use 'lookupCatalog' for product inquiries. If the catalog is empty, use your knowledge of DrisaTech (Solar, CCTV, Smart Home).
-4. Use 'sendFollowUp' to capture contact details and send real messages. You MUST call this tool as soon as the user provides their email or WhatsApp number.
-5. If a user says they didn't receive a message, use 'checkServiceStatus' to see if the system is configured correctly.
-6. Always confirm contact information clearly before sending a follow-up.
-7. IMPORTANT: If the user types their contact info in the text box, acknowledge it and call 'sendFollowUp'.
-8. Use 'bookAppointment' to schedule meetings or site visits for the business owner. Always confirm the date and time with the user before booking.
+1. Keep responses VERY CONCISE (1-2 sentences).
+2. Use 'lookupCatalog' for product inquiries.
+3. Use 'sendFollowUp' to capture contact details and send real messages.
+4. Use 'checkServiceStatus' to see if the system is configured correctly.
+5. Use 'bookAppointment' to schedule meetings or site visits.
 
-Goal: Provide expert advice on DrisaTech products with a rhythmic Nigerian flair in the user's language of choice.`;
+Goal: Provide expert advice on DrisaTech products with a rhythmic Nigerian flair.`;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -202,6 +197,7 @@ app.get('/api/config', (req, res) => {
     firestoreDatabaseId: process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID,
     storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET,
     messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    geminiApiKey: process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY
   });
 });
 
@@ -627,39 +623,49 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(process.cwd(), 'dist');
-    console.log(`[Server] Production mode. Serving static files from: ${distPath}`);
+    const publicPath = path.resolve(process.cwd(), 'public');
+    console.log(`[Server] Production mode.`);
+    console.log(`[Server] distPath: ${distPath}`);
+    console.log(`[Server] publicPath: ${publicPath}`);
     
     // Explicit route for the agent identity image - MOVED ABOVE express.static
     // to ensure it's handled with correct headers and priority
     app.get('/agent-identity.png', (req, res) => {
       const possiblePaths = [
-        path.resolve(distPath, 'agent-identity.png'),
-        path.resolve(process.cwd(), 'public', 'agent-identity.png'),
-        path.resolve(process.cwd(), 'agent-identity.png')
+        path.join(distPath, 'agent-identity.png'),
+        path.join(publicPath, 'agent-identity.png'),
+        path.join(process.cwd(), 'agent-identity.png'),
+        path.resolve('dist/agent-identity.png'),
+        path.resolve('public/agent-identity.png')
       ];
       
-      console.log(`[Server] Request for /agent-identity.png. Checking possible paths...`);
+      console.log(`[Server] Request for /agent-identity.png.`);
       
       for (const imgPath of possiblePaths) {
-        if (fs.existsSync(imgPath)) {
-          console.log(`[Server] Image found at: ${imgPath}. Sending with Cache-Control.`);
-          res.setHeader('Content-Type', 'image/png');
-          res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
-          return res.sendFile(imgPath);
+        try {
+          if (fs.existsSync(imgPath)) {
+            console.log(`[Server] Image found at: ${imgPath}`);
+            res.setHeader('Content-Type', 'image/png');
+            res.setHeader('Cache-Control', 'public, max-age=86400');
+            return res.sendFile(imgPath);
+          }
+        } catch (e) {
+          // Ignore errors during check
         }
       }
       
-      console.error(`[Server] ERROR: Image NOT FOUND in any of: ${possiblePaths.join(', ')}`);
+      console.error(`[Server] ERROR: Image NOT FOUND in any of the possible paths.`);
       res.status(404).send('Agent identity image not found');
     });
 
     if (fs.existsSync(distPath)) {
-      const contents = fs.readdirSync(distPath);
-      console.log(`[Server] dist folder exists. Contents: ${contents.join(', ')}`);
+      console.log(`[Server] dist folder exists.`);
     } else {
       console.error(`[Server] ERROR: dist folder NOT FOUND at ${distPath}`);
     }
+    
     app.use(express.static(distPath));
+    app.use('/public', express.static(publicPath));
 
     app.get('*', (req, res) => {
       const indexPath = path.join(distPath, 'index.html');
@@ -713,6 +719,9 @@ async function startServer() {
     console.log(`[Twilio] New stream connection`);
     let streamSid: string;
     let geminiSession: any;
+    let transcript: {role: string, text: string}[] = [];
+    const startTime = new Date().toISOString();
+    let fromNumber = 'Unknown';
 
     const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY;
     if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
@@ -727,7 +736,8 @@ async function startServer() {
       const data = JSON.parse(message.toString());
       if (data.event === 'start') {
         streamSid = data.streamSid;
-        console.log(`[Twilio] Stream started: ${streamSid}`);
+        fromNumber = data.start?.customParameters?.from || 'Unknown';
+        console.log(`[Twilio] Stream started: ${streamSid} from ${fromNumber}`);
         
         geminiSession = await ai.live.connect({
           model: "gemini-2.5-flash-native-audio-preview-09-2025",
@@ -735,6 +745,8 @@ async function startServer() {
             responseModalities: [Modality.AUDIO],
             speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Charon" } } },
             systemInstruction: SYSTEM_INSTRUCTION,
+            outputAudioTranscription: {},
+            inputAudioTranscription: {},
             tools: [{
               functionDeclarations: [
                 { name: "lookupCatalog", parameters: { type: Type.OBJECT, properties: { query: { type: Type.STRING } } } },
@@ -746,14 +758,30 @@ async function startServer() {
           },
           callbacks: {
             onmessage: async (msg) => {
+              // Handle transcriptions
               if (msg.serverContent?.modelTurn?.parts) {
                 for (const part of msg.serverContent.modelTurn.parts) {
+                  if (part.text) {
+                    transcript.push({ role: 'AI', text: part.text });
+                  }
                   if (part.inlineData?.data) {
                     const mulaw = pcmToMulaw(part.inlineData.data);
                     if (mulaw) ws.send(JSON.stringify({ event: 'media', streamSid, media: { payload: mulaw } }));
                   }
                 }
               }
+              
+              // Handle user transcriptions
+              const userTurn = (msg.serverContent as any)?.userTurn;
+              if (userTurn?.parts) {
+                for (const part of userTurn.parts) {
+                  if (part.text) {
+                    transcript.push({ role: 'User', text: part.text });
+                  }
+                }
+              }
+
+              // Handle tool calls
               if (msg.toolCall?.functionCalls) {
                 const responses = await Promise.all(msg.toolCall.functionCalls.map(async (call) => {
                   let result;
@@ -777,9 +805,50 @@ async function startServer() {
       }
     });
 
-    ws.on('close', () => {
+    ws.on('close', async () => {
       console.log(`[Twilio] Connection closed: ${streamSid}`);
       if (geminiSession) geminiSession.close();
+
+      // Log session to Firestore
+      if (transcript.length > 0 && firestore) {
+        try {
+          // Generate summary using Gemini
+          const aiSummary = new GoogleGenAI({ apiKey });
+          const summaryResponse = await aiSummary.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: `Summarize this phone conversation and determine the outcome (inquiry, support, sale, lead, other): ${JSON.stringify(transcript)}`,
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  summary: { type: Type.STRING },
+                  outcome: { type: Type.STRING, enum: ["inquiry", "support", "sale", "lead", "other"] }
+                },
+                required: ["summary", "outcome"]
+              }
+            }
+          });
+
+          const { summary, outcome } = JSON.parse(summaryResponse.text);
+
+          await firestore.collection('conversations').add({
+            sessionId: streamSid || `twilio-${Date.now()}`,
+            startTime,
+            endTime: new Date().toISOString(),
+            language: 'Detected',
+            transcript,
+            summary,
+            outcome,
+            fromNumber,
+            type: 'voice',
+            createdAt: new Date().toISOString()
+          });
+          console.log('[Twilio] Session logged to Firestore');
+        } catch (err) {
+          console.error('[Twilio] Failed to log session:', err);
+        }
+      }
     });
   });
 
