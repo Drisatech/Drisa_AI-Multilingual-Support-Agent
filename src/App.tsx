@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import agentIdentityImg from './agent-identity.png';
 import { Product, FollowUp } from './types';
 import { useLiveAgent } from './hooks/useLiveAgent';
 import { Mic, MicOff, Phone, PhoneOff, Package, MessageSquare, Settings, Activity, Sun, Moon, BookOpen, LogIn, LogOut, Globe, FileText, Plus, Trash2, Send, Calendar, CheckCircle2 } from 'lucide-react';
@@ -384,7 +385,7 @@ export default function App() {
                 )}
                 <div className={`relative z-10 w-40 h-40 rounded-full overflow-hidden shadow-lg transition-all duration-300 border-4 ${isConnected ? (darkMode ? 'border-brand-primary' : 'border-brand-secondary') : (darkMode ? 'border-white/10' : 'border-zinc-200')}`}>
                   <img 
-                    src="/agent-identity.png" 
+                    src={agentIdentityImg} 
                     alt="Customer Support Agent" 
                     className="w-full h-full object-cover"
                   />
