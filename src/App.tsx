@@ -384,7 +384,7 @@ export default function App() {
                 )}
                 <div className={`relative z-10 w-40 h-40 rounded-full overflow-hidden shadow-lg transition-all duration-300 border-4 ${isConnected ? (darkMode ? 'border-brand-primary' : 'border-brand-secondary') : (darkMode ? 'border-white/10' : 'border-zinc-200')}`}>
                   <img 
-                    src="/agent-identity.png" 
+                    src="/identity.png" 
                     alt="Customer Support Agent" 
                     className="w-full h-full object-cover"
                     referrerPolicy="no-referrer"

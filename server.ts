@@ -403,6 +403,12 @@ async function startServer() {
   } else {
     const distPath = path.join(__dirname, 'dist');
     app.use(express.static(distPath));
+    
+    // Explicit route for the identity image to ensure it's served correctly in production
+    app.get('/identity.png', (req, res) => {
+      res.sendFile(path.join(distPath, 'identity.png'));
+    });
+
     app.get('*', (req, res) => {
       const indexPath = path.join(distPath, 'index.html');
       if (fs.existsSync(indexPath)) {
