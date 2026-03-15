@@ -250,7 +250,8 @@ export default function App() {
             </button>
             
             {isAdmin && (
-              <>
+              <div className="mt-6 mb-2">
+                <p className="px-4 text-xs font-bold uppercase tracking-[0.2em] text-white mb-2">Admin Dashboard</p>
                 <button 
                   onClick={() => setActiveTab('kb')}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'kb' ? (darkMode ? 'bg-brand-primary text-white' : 'bg-brand-secondary text-white') : 'hover:bg-white/10'}`}
@@ -279,7 +280,7 @@ export default function App() {
                   <Settings className="w-5 h-5" />
                   Settings
                 </button>
-              </>
+              </div>
             )}
           </nav>
 
@@ -384,11 +385,11 @@ export default function App() {
                     <div className={`absolute inset-4 rounded-full border-4 animate-pulse ${darkMode ? 'border-brand-primary/40' : 'border-brand-secondary/40'}`}></div>
                   </>
                 )}
-                <div className={`relative z-10 w-40 h-40 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 border-4 ${isConnected ? 'border-brand-secondary bg-brand-secondary/10' : (darkMode ? 'border-brand-secondary/30 bg-white/5' : 'border-brand-secondary/20 bg-zinc-50')}`}>
-                  <Headphones className={`w-20 h-20 ${isConnected ? 'text-brand-secondary' : (darkMode ? 'text-brand-secondary/40' : 'text-brand-secondary/30')}`} />
+                <div className={`relative z-10 w-40 h-40 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 border-4 ${isConnected ? (darkMode ? 'border-brand-primary bg-brand-primary/10' : 'border-brand-secondary bg-brand-secondary/10') : (darkMode ? 'border-brand-primary/30 bg-white/5' : 'border-brand-secondary/20 bg-zinc-50')}`}>
+                  <Headphones className={`w-20 h-20 ${isConnected ? (darkMode ? 'text-brand-primary' : 'text-brand-secondary') : (darkMode ? 'text-brand-primary/40' : 'text-brand-secondary/30')}`} />
                   {isConnected && (
-                    <div className={`absolute inset-0 flex items-center justify-center ${darkMode ? 'bg-brand-secondary/10' : 'bg-brand-secondary/10'}`}>
-                      <div className={`w-4 h-4 rounded-full animate-pulse shadow-[0_0_15px_rgba(140,18,138,0.8)] bg-brand-secondary`}></div>
+                    <div className={`absolute inset-0 flex items-center justify-center ${darkMode ? 'bg-brand-primary/10' : 'bg-brand-secondary/10'}`}>
+                      <div className={`w-4 h-4 rounded-full animate-pulse shadow-[0_0_15px_${darkMode ? 'rgba(178,24,35,0.8)' : 'rgba(140,18,138,0.8)'}] ${darkMode ? 'bg-brand-primary' : 'bg-brand-secondary'}`}></div>
                     </div>
                   )}
                 </div>
