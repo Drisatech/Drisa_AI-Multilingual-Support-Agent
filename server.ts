@@ -13,17 +13,35 @@ import { db } from './db.js';
 import { Firestore } from '@google-cloud/firestore';
 import pkg from 'wavefile';
 const { WaveFile } = pkg;
-import firebaseConfig from './firebase-applet-config.json' assert { type: 'json' };
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Load Firebase configuration safely
+let firebaseConfig: any = {};
+try {
+  const configPath = path.resolve(__dirname, 'firebase-applet-config.json');
+  if (fs.existsSync(configPath)) {
+    firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    console.log('[Server] Firebase config loaded successfully');
+  } else {
+    console.warn('[Server] WARNING: firebase-applet-config.json not found. Using empty config.');
+  }
+} catch (err) {
+  console.error('[Server] ERROR loading firebase-applet-config.json:', err);
+}
+
 let firestore: Firestore;
 try {
-  firestore = new Firestore({
-    projectId: firebaseConfig.projectId,
-    databaseId: firebaseConfig.firestoreDatabaseId
-  });
+  if (firebaseConfig.projectId) {
+    firestore = new Firestore({
+      projectId: firebaseConfig.projectId,
+      databaseId: firebaseConfig.firestoreDatabaseId
+    });
+    console.log('[Server] Firestore initialized');
+  } else {
+    console.warn('[Server] WARNING: No Firestore project ID found. Firestore disabled.');
+    firestore = null as any;
+  }
 } catch (e) {
   console.error("Firestore initialization failed:", e);
   firestore = null as any;
@@ -34,8 +52,12 @@ app.set('trust proxy', true);
 
 // In AI Studio, we MUST listen on port 3000.
 // In external Cloud Run, we MUST listen on the port provided by the PORT environment variable (usually 8080).
-// We detect AI Studio by the presence of the APP_URL environment variable.
-const PORT = (process.env.APP_URL) ? 3000 : (Number(process.env.PORT) || 8080);
+// We detect AI Studio by the presence of the APPLET_ID environment variable.
+const PORT = (process.env.APPLET_ID) ? 3000 : (Number(process.env.PORT) || 8080);
+
+console.log(`[Server] Starting up...`);
+console.log(`[Server] Environment: ${process.env.NODE_ENV}`);
+console.log(`[Server] PORT: ${PORT} (Source: ${process.env.APPLET_ID ? 'AI Studio Override' : (process.env.PORT ? 'Env Var' : 'Default')})`);
 
 const SYSTEM_INSTRUCTION = `You are Drisa, a professional Nigerian AI Sales & Support Agent for DrisaTech (https://drisatech.com.ng).
 
