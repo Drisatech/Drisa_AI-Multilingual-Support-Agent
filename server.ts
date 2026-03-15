@@ -31,7 +31,7 @@ try {
 
 const app = express();
 app.set('trust proxy', true);
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = 3000;
 
 const SYSTEM_INSTRUCTION = `You are Drisa, a professional Nigerian AI Sales & Support Agent for DrisaTech (https://drisatech.com.ng).
 
@@ -410,6 +410,20 @@ async function startServer() {
       console.error(`[Server] ERROR: dist folder NOT FOUND at ${distPath}`);
     }
     app.use(express.static(distPath));
+
+    // Explicit route for the agent identity image to ensure it's served correctly in production
+    app.get('/agent-identity.png', (req, res) => {
+      const imagePath = path.resolve(distPath, 'agent-identity.png');
+      console.log(`[Server] Request for /agent-identity.png. Absolute path: ${imagePath}`);
+      if (fs.existsSync(imagePath)) {
+        console.log(`[Server] Image found. Sending with image/png type.`);
+        res.setHeader('Content-Type', 'image/png');
+        res.sendFile(imagePath);
+      } else {
+        console.error(`[Server] ERROR: Image NOT FOUND at ${imagePath}`);
+        res.status(404).send('Agent identity image not found');
+      }
+    });
 
     app.get('*', (req, res) => {
       const indexPath = path.join(distPath, 'index.html');

@@ -19,8 +19,8 @@ RUN npm run build
 # Set the environment variable to production
 ENV NODE_ENV=production
 
-# Expose the port Cloud Run will use (Google Cloud defaults to 8080)
-EXPOSE 8080
+# Expose the port the application will use
+EXPOSE 3000
 
 # Start the application using the start script defined in package.json
 CMD ["npm", "start"]
