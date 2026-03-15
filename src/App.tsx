@@ -1,13 +1,65 @@
 import { useState, useEffect, useRef } from 'react';
 import { Product, FollowUp } from './types';
 import { useLiveAgent } from './hooks/useLiveAgent';
-import { Mic, MicOff, Phone, PhoneOff, Package, MessageSquare, Settings, Activity, Sun, Moon, BookOpen, LogIn, LogOut, Globe, FileText, Plus, Trash2, Send, Calendar, CheckCircle2, Headphones } from 'lucide-react';
+import { Mic, MicOff, Phone, PhoneOff, Package, MessageSquare, Settings, Activity, Sun, Moon, BookOpen, LogIn, LogOut, Globe, FileText, Plus, Trash2, Send, Calendar, CheckCircle2, Menu, X, Headphones as LucideHeadphones, User as UserIcon, Users } from 'lucide-react';
+
+const DrisaLogo = ({ className }: { className?: string }) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    {/* Vertical stick (Mouth piece stick) */}
+    <path d="M8 7v13" />
+    
+    {/* Headband (Curve of the D) */}
+    <path d="M8 7c8 0 10 3 10 6.5s-2 6.5-10 6.5" />
+    
+    {/* Ear piece side turned 90 degrees to the left (horizontal) */}
+    <rect x="6" y="2" width="4" height="2" rx="0.5" />
+    
+    {/* Mic tip at the bottom of the stick */}
+    <circle cx="8" cy="20" r="1" fill="currentColor" />
+  </svg>
+);
 import { auth, signInWithGoogle, db as fdb, getRedirectResult } from './firebase';
 import { onAuthStateChanged, User, signOut } from 'firebase/auth';
-import { collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, doc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, doc, deleteDoc, updateDoc, getDoc, setDoc, getDocFromServer } from 'firebase/firestore';
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'agent' | 'kb' | 'sessions' | 'leads' | 'settings'>('agent');
+  const [activeTab, setActiveTab] = useState<'agent' | 'kb' | 'sessions' | 'leads' | 'settings' | 'users'>('agent');
   const [isCalendarConnected, setIsCalendarConnected] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [isWidgetMode, setIsWidgetMode] = useState(false);
@@ -19,9 +71,12 @@ export default function App() {
   const [messageInput, setMessageInput] = useState('');
   const [debugAuth, setDebugAuth] = useState(false);
   
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  
   // Sessions State
   const [sessions, setSessions] = useState<any[]>([]);
   const [leads, setLeads] = useState<any[]>([]);
+  const [usersList, setUsersList] = useState<any[]>([]);
   
   // Knowledge Base State
   const [kbSources, setKbSources] = useState<any[]>([]);
@@ -29,6 +84,54 @@ export default function App() {
   const [newSourceArticle, setNewSourceArticle] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [appError, setAppError] = useState<string | null>(null);
+  const [whatsappToken, setWhatsappToken] = useState('');
+  const [whatsappPhoneId, setWhatsappPhoneId] = useState('');
+  const [smtpUser, setSmtpUser] = useState('');
+  const [smtpPass, setSmtpPass] = useState('');
+  const [smtpHost, setSmtpHost] = useState('');
+  const [smtpPort, setSmtpPort] = useState('');
+  const [companyName, setCompanyName] = useState('DrisaTech');
+  const [agentName, setAgentName] = useState('Drisa');
+  const [defaultLanguage, setDefaultLanguage] = useState('English');
+  const [customInstructions, setCustomInstructions] = useState('');
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+
+  const handleFirestoreError = (error: unknown, operationType: OperationType, path: string | null) => {
+    const errInfo: FirestoreErrorInfo = {
+      error: error instanceof Error ? error.message : String(error),
+      authInfo: {
+        userId: auth?.currentUser?.uid,
+        email: auth?.currentUser?.email,
+        emailVerified: auth?.currentUser?.emailVerified,
+        isAnonymous: auth?.currentUser?.isAnonymous,
+        tenantId: auth?.currentUser?.tenantId,
+        providerInfo: auth?.currentUser?.providerData.map(provider => ({
+          providerId: provider.providerId,
+          displayName: provider.displayName,
+          email: provider.email,
+          photoUrl: provider.photoURL
+        })) || []
+      },
+      operationType,
+      path
+    };
+    console.error('Firestore Error: ', JSON.stringify(errInfo));
+    setAppError(`Database Error: ${errInfo.error}`);
+    throw new Error(JSON.stringify(errInfo));
+  };
+
+  const testConnection = async () => {
+    if (!fdb) return;
+    try {
+      await getDocFromServer(doc(fdb, 'test', 'connection'));
+      console.log("[Firestore] Connection test successful.");
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('the client is offline')) {
+        console.error("Please check your Firebase configuration. The client is offline.");
+        setAppError("Database is offline. Please check your connection.");
+      }
+    }
+  };
 
   const { isConnected, isConnecting, error, connect, disconnect, sendMessage } = useLiveAgent();
   const [callDuration, setCallDuration] = useState(0);
@@ -68,29 +171,83 @@ export default function App() {
       setIsWidgetMode(true);
     }
 
-    const unsubscribe = auth ? onAuthStateChanged(auth, (u) => {
+    const unsubscribe = auth ? onAuthStateChanged(auth, async (u) => {
       console.log("Auth state changed:", u?.email);
       setUser(u);
-      setIsAdmin(u?.email?.toLowerCase() === 'drisatech@gmail.com');
+      if (u) {
+        // Super admin check
+        const isSuperAdmin = u.email?.toLowerCase() === 'drisatech@gmail.com';
+        setIsAdmin(isSuperAdmin);
+        
+        // Fetch role from Firestore
+        if (fdb) {
+          try {
+            const userDoc = await getDoc(doc(fdb, 'users', u.uid));
+            if (userDoc.exists()) {
+              const data = userDoc.data();
+              if (data.role === 'admin') setIsAdmin(true);
+            } else {
+              // Create initial user profile
+              await setDoc(doc(fdb, 'users', u.uid), {
+                email: u.email,
+                displayName: u.displayName,
+                role: isSuperAdmin ? 'admin' : 'user',
+                updatedAt: serverTimestamp()
+              });
+            }
+          } catch (err) {
+            console.error("Error fetching user role:", err);
+          }
+        }
+      } else {
+        setIsAdmin(false);
+      }
       setIsAuthLoading(false);
     }) : () => { setIsAuthLoading(false); };
 
     // Handle redirect result
     if (auth) {
-      getRedirectResult(auth).then((result) => {
+      getRedirectResult(auth).then(async (result) => {
         if (result?.user) {
-          console.log("Redirect result user:", result.user.email);
-          setUser(result.user);
-          setIsAdmin(result.user.email?.toLowerCase() === 'drisatech@gmail.com');
+          const u = result.user;
+          console.log("Redirect result user:", u.email);
+          setUser(u);
+          
+          const isSuperAdmin = u.email?.toLowerCase() === 'drisatech@gmail.com';
+          setIsAdmin(isSuperAdmin);
+
+          if (fdb) {
+            try {
+              const userDoc = await getDoc(doc(fdb, 'users', u.uid));
+              if (userDoc.exists()) {
+                const data = userDoc.data();
+                if (data.role === 'admin') setIsAdmin(true);
+              } else {
+                await setDoc(doc(fdb, 'users', u.uid), {
+                  email: u.email,
+                  displayName: u.displayName,
+                  role: isSuperAdmin ? 'admin' : 'user',
+                  updatedAt: serverTimestamp()
+                });
+              }
+            } catch (err) {
+              console.error("Error syncing user on redirect:", err);
+            }
+          }
         }
         setIsAuthLoading(false);
+        testConnection();
       }).catch((err) => {
         console.error("Redirect auth error:", err.code, err.message);
         setIsAuthLoading(false);
         if (err.code === 'auth/unauthorized-domain') {
           setAppError(`Domain Unauthorized: Please add ${window.location.hostname} to your Firebase Authorized Domains.`);
         }
+        testConnection();
       });
+    } else {
+      setIsAuthLoading(false);
+      testConnection();
     }
 
     return () => unsubscribe();
@@ -144,8 +301,109 @@ export default function App() {
         console.error("Firestore Leads Error:", err);
       });
       return () => unsubscribe();
+    } else if (isAdmin && activeTab === 'users' && fdb) {
+      const q = query(collection(fdb, 'users'), orderBy('updatedAt', 'desc'));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        setUsersList(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'users');
+      });
+      return () => unsubscribe();
+    } else if (isAdmin && activeTab === 'settings' && fdb) {
+      const fetchSettings = async () => {
+        try {
+          // Fetch WhatsApp Settings
+          const waRef = doc(fdb, 'settings', 'whatsapp');
+          const waSnap = await getDoc(waRef);
+          if (waSnap.exists()) {
+            const data = waSnap.data();
+            setWhatsappToken(data.accessToken || '');
+            setWhatsappPhoneId(data.phoneNumberId || '');
+          }
+
+          // Fetch SMTP Settings
+          const smtpRef = doc(fdb, 'settings', 'email');
+          const smtpSnap = await getDoc(smtpRef);
+          if (smtpSnap.exists()) {
+            const data = smtpSnap.data();
+            setSmtpUser(data.user || '');
+            setSmtpPass(data.pass || '');
+            setSmtpHost(data.host || '');
+            setSmtpPort(data.port || '');
+          }
+
+          // Fetch Business Profile
+          const bizRef = doc(fdb, 'settings', 'business');
+          const bizSnap = await getDoc(bizRef);
+          if (bizSnap.exists()) {
+            const data = bizSnap.data();
+            setCompanyName(data.companyName || 'DrisaTech');
+            setAgentName(data.agentName || 'Drisa');
+            setDefaultLanguage(data.defaultLanguage || 'English');
+            setCustomInstructions(data.customInstructions || '');
+          }
+        } catch (err) {
+          console.error("Error fetching settings:", err);
+        }
+      };
+      fetchSettings();
     }
   }, [isAdmin, activeTab]);
+
+  const handleSaveWhatsappSettings = async () => {
+    if (!fdb || !isAdmin) return;
+    setIsSavingSettings(true);
+    try {
+      await setDoc(doc(fdb, 'settings', 'whatsapp'), {
+        accessToken: whatsappToken,
+        phoneNumberId: whatsappPhoneId,
+        updatedAt: serverTimestamp()
+      });
+      alert("WhatsApp settings saved successfully!");
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'settings/whatsapp');
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
+  const handleSaveEmailSettings = async () => {
+    if (!fdb || !isAdmin) return;
+    setIsSavingSettings(true);
+    try {
+      await setDoc(doc(fdb, 'settings', 'email'), {
+        user: smtpUser,
+        pass: smtpPass,
+        host: smtpHost,
+        port: smtpPort,
+        updatedAt: serverTimestamp()
+      });
+      alert("Email settings saved successfully!");
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'settings/email');
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
+  const handleSaveBusinessProfile = async () => {
+    if (!fdb || !isAdmin) return;
+    setIsSavingSettings(true);
+    try {
+      await setDoc(doc(fdb, 'settings', 'business'), {
+        companyName,
+        agentName,
+        defaultLanguage,
+        customInstructions,
+        updatedAt: serverTimestamp()
+      });
+      alert("Business profile saved successfully!");
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'settings/business');
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -219,14 +477,36 @@ export default function App() {
 
   return (
     <div className={`min-h-screen flex flex-col md:flex-row font-sans transition-colors duration-300 ${darkMode ? 'bg-brand-secondary text-white' : 'bg-zinc-50 text-zinc-900'}`}>
+      {/* Mobile Header */}
+      {!isWidgetMode && (
+        <header className={`md:hidden flex items-center justify-between p-4 border-b transition-colors duration-300 ${darkMode ? 'bg-brand-secondary border-white/10' : 'bg-brand-primary text-white'}`}>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-full flex items-center justify-center bg-white/10 border border-white/20 shadow-sm overflow-hidden">
+              <DrisaLogo className="w-5 h-5 text-white" />
+            </div>
+            <span className="font-semibold text-lg">Drisa_AI</span>
+          </div>
+          <button 
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            className="p-2 rounded-lg hover:bg-white/10 transition-colors"
+          >
+            {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+          </button>
+        </header>
+      )}
+
       {/* Sidebar - Hidden in widget mode */}
       {!isWidgetMode && (
-        <aside className={`w-full md:w-64 flex flex-col transition-colors duration-300 ${darkMode ? 'bg-brand-secondary/90 border-r border-white/10' : 'bg-brand-primary text-white/80'}`}>
-          <div className={`p-6 border-b ${darkMode ? 'border-white/10' : 'border-white/10'}`}>
+        <aside className={`
+          ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+          fixed md:relative z-50 w-64 h-full md:h-auto flex flex-col transition-all duration-300 
+          ${darkMode ? 'bg-brand-secondary/95 border-r border-white/10' : 'bg-brand-primary text-white/80'}
+        `}>
+          <div className={`p-6 border-b hidden md:block ${darkMode ? 'border-white/10' : 'border-white/10'}`}>
             <div className="flex items-center justify-between mb-2">
               <h1 className="text-xl font-semibold text-white flex items-center gap-2">
                 <div className="w-8 h-8 rounded-full flex items-center justify-center bg-white/10 border border-white/20 shadow-sm overflow-hidden">
-                  <Headphones className="w-5 h-5 text-white" />
+                  <DrisaLogo className="w-5 h-5 text-white" />
                 </div>
                 Drisa_AI
               </h1>
@@ -242,7 +522,10 @@ export default function App() {
           </div>
           <nav className="flex-1 p-4 space-y-2">
             <button 
-              onClick={() => setActiveTab('agent')}
+              onClick={() => {
+                setActiveTab('agent');
+                setIsMobileMenuOpen(false);
+              }}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'agent' ? (darkMode ? 'bg-brand-primary text-white' : 'bg-brand-secondary text-white') : 'hover:bg-white/10'}`}
             >
               <Phone className="w-5 h-5" />
@@ -253,28 +536,50 @@ export default function App() {
               <div className="mt-6 mb-2">
                 <p className="px-4 text-xs font-bold uppercase tracking-[0.2em] text-white mb-2">Admin Dashboard</p>
                 <button 
-                  onClick={() => setActiveTab('kb')}
+                  onClick={() => {
+                    setActiveTab('kb');
+                    setIsMobileMenuOpen(false);
+                  }}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'kb' ? (darkMode ? 'bg-brand-primary text-white' : 'bg-brand-secondary text-white') : 'hover:bg-white/10'}`}
                 >
                   <BookOpen className="w-5 h-5" />
                   Knowledge Base
                 </button>
                 <button 
-                  onClick={() => setActiveTab('sessions')}
+                  onClick={() => {
+                    setActiveTab('sessions');
+                    setIsMobileMenuOpen(false);
+                  }}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'sessions' ? (darkMode ? 'bg-brand-primary text-white' : 'bg-brand-secondary text-white') : 'hover:bg-white/10'}`}
                 >
                   <Activity className="w-5 h-5" />
                   Call Sessions
                 </button>
                 <button 
-                  onClick={() => setActiveTab('leads')}
+                  onClick={() => {
+                    setActiveTab('leads');
+                    setIsMobileMenuOpen(false);
+                  }}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'leads' ? (darkMode ? 'bg-brand-primary text-white' : 'bg-brand-secondary text-white') : 'hover:bg-white/10'}`}
                 >
                   <Package className="w-5 h-5" />
                   Leads & Follow-ups
                 </button>
                 <button 
-                  onClick={() => setActiveTab('settings')}
+                  onClick={() => {
+                    setActiveTab('users');
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'users' ? (darkMode ? 'bg-brand-primary text-white' : 'bg-brand-secondary text-white') : 'hover:bg-white/10'}`}
+                >
+                  <Users className="w-5 h-5" />
+                  Authorized Users
+                </button>
+                <button 
+                  onClick={() => {
+                    setActiveTab('settings');
+                    setIsMobileMenuOpen(false);
+                  }}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'settings' ? (darkMode ? 'bg-brand-primary text-white' : 'bg-brand-secondary text-white') : 'hover:bg-white/10'}`}
                 >
                   <Settings className="w-5 h-5" />
@@ -296,7 +601,7 @@ export default function App() {
                   {!isAdmin && (
                     <div className="text-amber-400 mt-2 p-2 bg-amber-400/10 border border-amber-400/20 rounded-lg">
                       <p className="font-bold">Access Restricted</p>
-                      <p className="opacity-80">Only drisatech@gmail.com has admin access.</p>
+                      <p className="opacity-80 text-[10px]">Your account needs admin authorization from the super admin.</p>
                     </div>
                   )}
                 </div>
@@ -336,6 +641,14 @@ export default function App() {
             )}
           </div>
         </aside>
+      )}
+
+      {/* Mobile Overlay */}
+      {isMobileMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
       )}
 
       {/* Main Content */}
@@ -386,7 +699,7 @@ export default function App() {
                   </>
                 )}
                 <div className={`relative z-10 w-40 h-40 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 border-4 ${isConnected ? (darkMode ? 'border-brand-primary bg-brand-primary/10' : 'border-brand-secondary bg-brand-secondary/10') : (darkMode ? 'border-brand-primary/30 bg-white/5' : 'border-brand-secondary/20 bg-zinc-50')}`}>
-                  <Headphones className={`w-20 h-20 ${isConnected ? (darkMode ? 'text-brand-primary' : 'text-brand-secondary') : (darkMode ? 'text-brand-primary/40' : 'text-brand-secondary/30')}`} />
+                  <DrisaLogo className={`w-20 h-20 ${isConnected ? (darkMode ? 'text-brand-primary' : 'text-brand-secondary') : (darkMode ? 'text-brand-primary/40' : 'text-brand-secondary/30')}`} />
                   {isConnected && (
                     <div className={`absolute inset-0 flex items-center justify-center ${darkMode ? 'bg-brand-primary/10' : 'bg-brand-secondary/10'}`}>
                       <div className={`w-4 h-4 rounded-full animate-pulse shadow-[0_0_15px_${darkMode ? 'rgba(178,24,35,0.8)' : 'rgba(140,18,138,0.8)'}] ${darkMode ? 'bg-brand-primary' : 'bg-brand-secondary'}`}></div>
@@ -687,6 +1000,66 @@ export default function App() {
           </div>
         )}
 
+        {activeTab === 'users' && isAdmin && (
+          <div className="max-w-5xl mx-auto">
+            <div className="mb-8 flex justify-between items-end">
+              <div>
+                <h2 className={`text-3xl font-semibold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>Authorized Users</h2>
+                <p className={`${darkMode ? 'text-white/60' : 'text-zinc-500'} mt-2`}>Manage who has access to the admin dashboard.</p>
+              </div>
+              <div className={`text-xs font-bold uppercase tracking-widest ${darkMode ? 'text-white/40' : 'text-zinc-400'}`}>
+                Total Users: {usersList.length}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4">
+              {usersList.map(u => (
+                <div key={u.id} className={`p-6 rounded-2xl border flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors duration-300 ${darkMode ? 'bg-brand-secondary border-white/10' : 'bg-white border-zinc-200'}`}>
+                  <div className="flex items-center gap-4">
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center ${darkMode ? 'bg-white/5' : 'bg-zinc-50'}`}>
+                      <UserIcon className={`w-6 h-6 ${u.role === 'admin' ? 'text-purple-500' : 'text-zinc-400'}`} />
+                    </div>
+                    <div>
+                      <div className={`font-bold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>{u.email}</div>
+                      <div className="text-xs text-zinc-400 uppercase tracking-wider mt-0.5">
+                        {u.displayName || 'No Name'} • Last seen: {u.updatedAt ? new Date(u.updatedAt.seconds * 1000).toLocaleString() : 'Unknown'}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-3">
+                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border ${
+                      u.role === 'admin' ? 'border-purple-500/50 text-purple-500 bg-purple-500/10' : 'border-zinc-500/50 text-zinc-500 bg-zinc-500/10'
+                    }`}>
+                      {u.role}
+                    </span>
+                    
+                    {u.email?.toLowerCase() !== 'drisatech@gmail.com' && (
+                      <button 
+                        onClick={async () => {
+                          if (fdb) {
+                            const newRole = u.role === 'admin' ? 'user' : 'admin';
+                            await updateDoc(doc(fdb, 'users', u.id), { role: newRole });
+                          }
+                        }}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${
+                          u.role === 'admin' ? 'bg-zinc-500/10 text-zinc-500 hover:bg-zinc-500/20' : 'bg-purple-500 text-white hover:bg-purple-600'
+                        }`}
+                      >
+                        {u.role === 'admin' ? 'Revoke Admin' : 'Make Admin'}
+                      </button>
+                    )}
+                    
+                    {u.email?.toLowerCase() === 'drisatech@gmail.com' && (
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-purple-500/50 italic">Super Admin</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {activeTab === 'sessions' && isAdmin && (
           <div className="max-w-5xl mx-auto">
             <div className="mb-8">
@@ -697,9 +1070,9 @@ export default function App() {
             <div className="space-y-6">
               {sessions.map(session => (
                 <div key={session.id} className={`rounded-2xl p-6 shadow-sm border transition-colors duration-300 ${darkMode ? 'bg-brand-secondary border-white/10' : 'bg-white border-zinc-200'}`}>
-                  <div className="flex justify-between items-start mb-4">
+                  <div className="flex flex-col sm:flex-row justify-between items-start gap-4 mb-4">
                     <div>
-                      <div className="flex items-center gap-3 mb-1">
+                      <div className="flex flex-wrap items-center gap-3 mb-1">
                         <span className={`text-sm font-bold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>{session.sessionId}</span>
                         {session.clientIp && (
                           <span className="text-[10px] font-mono text-zinc-400 bg-zinc-100 dark:bg-white/5 px-1.5 py-0.5 rounded">
@@ -757,6 +1130,84 @@ export default function App() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className={`p-6 rounded-2xl border transition-colors duration-300 ${darkMode ? 'bg-brand-secondary border-white/10' : 'bg-white border-zinc-200'}`}>
                 <div className="flex items-center gap-3 mb-4">
+                  <DrisaLogo className="w-5 h-5 text-purple-500" />
+                  <h3 className={`font-semibold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>Business Profile & AI Training</h3>
+                </div>
+                <p className={`text-sm mb-6 ${darkMode ? 'text-white/60' : 'text-zinc-500'}`}>
+                  Customize your AI agent's identity and core instructions to match your business needs.
+                </p>
+                
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className={`block text-xs font-semibold uppercase tracking-wider mb-2 ${darkMode ? 'text-white/40' : 'text-zinc-500'}`}>
+                        Company Name
+                      </label>
+                      <input 
+                        type="text" 
+                        placeholder="DrisaTech"
+                        value={companyName}
+                        onChange={(e) => setCompanyName(e.target.value)}
+                        className={`w-full px-4 py-2 rounded-xl border transition-colors ${darkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-zinc-50 border-zinc-200 text-zinc-900'}`}
+                      />
+                    </div>
+                    <div>
+                      <label className={`block text-xs font-semibold uppercase tracking-wider mb-2 ${darkMode ? 'text-white/40' : 'text-zinc-500'}`}>
+                        Agent Name
+                      </label>
+                      <input 
+                        type="text" 
+                        placeholder="Drisa"
+                        value={agentName}
+                        onChange={(e) => setAgentName(e.target.value)}
+                        className={`w-full px-4 py-2 rounded-xl border transition-colors ${darkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-zinc-50 border-zinc-200 text-zinc-900'}`}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className={`block text-xs font-semibold uppercase tracking-wider mb-2 ${darkMode ? 'text-white/40' : 'text-zinc-500'}`}>
+                      Default Language (for Phone Calls)
+                    </label>
+                    <select 
+                      value={defaultLanguage}
+                      onChange={(e) => setDefaultLanguage(e.target.value)}
+                      className={`w-full px-4 py-2 rounded-xl border transition-colors appearance-none ${darkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-zinc-50 border-zinc-200 text-zinc-900'}`}
+                    >
+                      <option value="English">English</option>
+                      <option value="Hausa">Hausa</option>
+                      <option value="Igbo">Igbo</option>
+                      <option value="Yoruba">Yoruba</option>
+                      <option value="Pidgin English">Pidgin English</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className={`block text-xs font-semibold uppercase tracking-wider mb-2 ${darkMode ? 'text-white/40' : 'text-zinc-500'}`}>
+                      Custom AI Instructions
+                    </label>
+                    <textarea 
+                      placeholder="e.g. You are a luxury real estate expert. Focus on high-end properties in Lagos..."
+                      value={customInstructions}
+                      onChange={(e) => setCustomInstructions(e.target.value)}
+                      rows={4}
+                      className={`w-full px-4 py-2 rounded-xl border transition-colors resize-none ${darkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-zinc-50 border-zinc-200 text-zinc-900'}`}
+                    />
+                  </div>
+                  <button 
+                    onClick={handleSaveBusinessProfile}
+                    disabled={isSavingSettings}
+                    className="w-full py-3 bg-purple-500 text-white rounded-xl font-medium hover:bg-purple-600 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {isSavingSettings ? (
+                      <><Activity className="w-4 h-4 animate-spin" /> Saving...</>
+                    ) : (
+                      <><CheckCircle2 className="w-4 h-4" /> Save Business Profile</>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <div className={`p-6 rounded-2xl border transition-colors duration-300 ${darkMode ? 'bg-brand-secondary border-white/10' : 'bg-white border-zinc-200'}`}>
+                <div className="flex items-center gap-3 mb-4">
                   <Calendar className="w-5 h-5 text-brand-primary" />
                   <h3 className={`font-semibold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>Google Calendar</h3>
                 </div>
@@ -787,6 +1238,128 @@ export default function App() {
                     Connect Google Calendar
                   </button>
                 )}
+              </div>
+
+              <div className={`p-6 rounded-2xl border transition-colors duration-300 ${darkMode ? 'bg-brand-secondary border-white/10' : 'bg-white border-zinc-200'}`}>
+                <div className="flex items-center gap-3 mb-4">
+                  <MessageSquare className="w-5 h-5 text-emerald-500" />
+                  <h3 className={`font-semibold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>WhatsApp Integration</h3>
+                </div>
+                <p className={`text-sm mb-6 ${darkMode ? 'text-white/60' : 'text-zinc-500'}`}>
+                  Configure your WhatsApp Business API credentials to allow the agent to send follow-up messages.
+                </p>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className={`block text-xs font-semibold uppercase tracking-wider mb-2 ${darkMode ? 'text-white/40' : 'text-zinc-500'}`}>
+                      Access Token
+                    </label>
+                    <input 
+                      type="password" 
+                      placeholder="EAAB..."
+                      value={whatsappToken}
+                      onChange={(e) => setWhatsappToken(e.target.value)}
+                      className={`w-full px-4 py-2 rounded-xl border transition-colors ${darkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-zinc-50 border-zinc-200 text-zinc-900'}`}
+                    />
+                  </div>
+                  <div>
+                    <label className={`block text-xs font-semibold uppercase tracking-wider mb-2 ${darkMode ? 'text-white/40' : 'text-zinc-500'}`}>
+                      Phone Number ID
+                    </label>
+                    <input 
+                      type="text" 
+                      placeholder="105..."
+                      value={whatsappPhoneId}
+                      onChange={(e) => setWhatsappPhoneId(e.target.value)}
+                      className={`w-full px-4 py-2 rounded-xl border transition-colors ${darkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-zinc-50 border-zinc-200 text-zinc-900'}`}
+                    />
+                  </div>
+                  <button 
+                    onClick={handleSaveWhatsappSettings}
+                    disabled={isSavingSettings}
+                    className="w-full py-3 bg-emerald-500 text-white rounded-xl font-medium hover:bg-emerald-600 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {isSavingSettings ? (
+                      <><Activity className="w-4 h-4 animate-spin" /> Saving...</>
+                    ) : (
+                      <><CheckCircle2 className="w-4 h-4" /> Save WhatsApp Settings</>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <div className={`p-6 rounded-2xl border transition-colors duration-300 ${darkMode ? 'bg-brand-secondary border-white/10' : 'bg-white border-zinc-200'}`}>
+                <div className="flex items-center gap-3 mb-4">
+                  <Send className="w-5 h-5 text-blue-500" />
+                  <h3 className={`font-semibold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>Email (SMTP) Integration</h3>
+                </div>
+                <p className={`text-sm mb-6 ${darkMode ? 'text-white/60' : 'text-zinc-500'}`}>
+                  Configure your SMTP credentials to allow the agent to send follow-up emails to customers.
+                </p>
+                
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className={`block text-xs font-semibold uppercase tracking-wider mb-2 ${darkMode ? 'text-white/40' : 'text-zinc-500'}`}>
+                        SMTP Host
+                      </label>
+                      <input 
+                        type="text" 
+                        placeholder="smtp.gmail.com"
+                        value={smtpHost}
+                        onChange={(e) => setSmtpHost(e.target.value)}
+                        className={`w-full px-4 py-2 rounded-xl border transition-colors ${darkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-zinc-50 border-zinc-200 text-zinc-900'}`}
+                      />
+                    </div>
+                    <div>
+                      <label className={`block text-xs font-semibold uppercase tracking-wider mb-2 ${darkMode ? 'text-white/40' : 'text-zinc-500'}`}>
+                        SMTP Port
+                      </label>
+                      <input 
+                        type="text" 
+                        placeholder="465"
+                        value={smtpPort}
+                        onChange={(e) => setSmtpPort(e.target.value)}
+                        className={`w-full px-4 py-2 rounded-xl border transition-colors ${darkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-zinc-50 border-zinc-200 text-zinc-900'}`}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className={`block text-xs font-semibold uppercase tracking-wider mb-2 ${darkMode ? 'text-white/40' : 'text-zinc-500'}`}>
+                      SMTP User (Email)
+                    </label>
+                    <input 
+                      type="text" 
+                      placeholder="user@example.com"
+                      value={smtpUser}
+                      onChange={(e) => setSmtpUser(e.target.value)}
+                      className={`w-full px-4 py-2 rounded-xl border transition-colors ${darkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-zinc-50 border-zinc-200 text-zinc-900'}`}
+                    />
+                  </div>
+                  <div>
+                    <label className={`block text-xs font-semibold uppercase tracking-wider mb-2 ${darkMode ? 'text-white/40' : 'text-zinc-500'}`}>
+                      SMTP Password / App Password
+                    </label>
+                    <input 
+                      type="password" 
+                      placeholder="••••••••••••"
+                      value={smtpPass}
+                      onChange={(e) => setSmtpPass(e.target.value)}
+                      className={`w-full px-4 py-2 rounded-xl border transition-colors ${darkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-zinc-50 border-zinc-200 text-zinc-900'}`}
+                    />
+                  </div>
+                  <button 
+                    onClick={handleSaveEmailSettings}
+                    disabled={isSavingSettings}
+                    className="w-full py-3 bg-blue-500 text-white rounded-xl font-medium hover:bg-blue-600 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {isSavingSettings ? (
+                      <><Activity className="w-4 h-4 animate-spin" /> Saving...</>
+                    ) : (
+                      <><CheckCircle2 className="w-4 h-4" /> Save Email Settings</>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

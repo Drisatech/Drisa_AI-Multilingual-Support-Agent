@@ -94,14 +94,20 @@ export function useLiveAgent() {
 
       // Try to get API key from environment first, then from server
       let apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
-        try {
-          const configRes = await fetch('/api/config');
-          const config = await configRes.json();
+      let dynamicInstruction = '';
+      
+      try {
+        const configRes = await fetch('/api/config');
+        const config = await configRes.json();
+        if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
           apiKey = config.geminiApiKey;
-        } catch (e) {
-          console.error("Failed to fetch config from server:", e);
         }
+        
+        const instructionRes = await fetch('/api/system-instruction');
+        const instructionData = await instructionRes.json();
+        dynamicInstruction = instructionData.instruction;
+      } catch (e) {
+        console.error("Failed to fetch config from server:", e);
       }
 
       if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
@@ -118,7 +124,7 @@ export function useLiveAgent() {
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: "Charon" } },
           },
-          systemInstruction: `${SYSTEM_INSTRUCTION}\n\nUser's initial preferred language: ${preferredLanguage}`,
+          systemInstruction: `${dynamicInstruction}\n\nUser's initial preferred language: ${preferredLanguage}`,
           inputAudioTranscription: {},
           outputAudioTranscription: {},
           tools: [{
@@ -198,9 +204,9 @@ export function useLiveAgent() {
               });
             };
 
-            // Initial greeting
+            // Initial greeting based on preferred language
             sessionRef.current?.sendRealtimeInput({
-              parts: [{ text: "Introduce yourself briefly as the DrisaTech AI Support Agent and ask how you can help." }]
+              parts: [{ text: `Introduce yourself briefly as the DrisaTech AI Support Agent and ask how you can help. Please greet the user in ${preferredLanguage}.` }]
             });
           },
           onmessage: async (message) => {

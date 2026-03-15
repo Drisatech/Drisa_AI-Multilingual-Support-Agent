@@ -64,9 +64,25 @@
         "expiry_date": { "type": "number" },
         "updatedAt": { "type": "string", "format": "date-time" }
       }
+    },
+    "User": {
+      "title": "User",
+      "description": "Application user profile and permissions.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "displayName": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "role"]
     }
   },
   "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles and roles"
+    },
     "/leads/{leadId}": {
       "schema": "Lead",
       "description": "Collection of captured customer leads"

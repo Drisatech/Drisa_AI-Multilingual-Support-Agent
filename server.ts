@@ -62,8 +62,30 @@ console.log(`[Server] Starting up...`);
 console.log(`[Server] Environment: ${process.env.NODE_ENV}`);
 console.log(`[Server] PORT: ${PORT} (Source: ${process.env.APPLET_ID ? 'AI Studio Override' : (process.env.PORT ? 'Env Var' : 'Default')})`);
 
-const SYSTEM_INSTRUCTION = `You are Drisa, a professional Nigerian AI Sales & Support Agent for DrisaTech (https://drisatech.com.ng).
+async function getSystemInstruction() {
+  let companyName = "DrisaTech";
+  let agentName = "Drisa";
+  let defaultLanguage = "English";
+  let customInstructions = "";
 
+  if (firestore) {
+    try {
+      const bizDoc = await firestore.collection('settings').doc('business').get();
+      if (bizDoc.exists) {
+        const data = bizDoc.data();
+        companyName = data?.companyName || companyName;
+        agentName = data?.agentName || agentName;
+        defaultLanguage = data?.defaultLanguage || defaultLanguage;
+        customInstructions = data?.customInstructions || "";
+      }
+    } catch (e) {
+      console.error('[Firestore] Error fetching business settings:', e);
+    }
+  }
+
+  return {
+    instruction: `You are ${agentName}, a professional Nigerian AI Sales & Support Agent for ${companyName}.
+${customInstructions ? `\nCORE BUSINESS CONTEXT:\n${customInstructions}\n` : ''}
 LANGUAGE & MULTILINGUAL RULES:
 - You are fluent in English, Hausa, Igbo, Yoruba, and Nigerian Pidgin.
 - CRITICAL: You MUST respond in the EXACT SAME language the user is speaking.
@@ -82,7 +104,10 @@ CONVERSATION RULES:
 4. Use 'checkServiceStatus' to see if the system is configured correctly.
 5. Use 'bookAppointment' to schedule meetings or site visits.
 
-Goal: Provide expert advice on DrisaTech products with a rhythmic Nigerian flair.`;
+Goal: Provide expert advice on ${companyName} products with a rhythmic Nigerian flair.`,
+    defaultLanguage
+  };
+}
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -204,6 +229,11 @@ app.get('/api/config', (req, res) => {
   });
 });
 
+app.get('/api/system-instruction', async (req, res) => {
+  const { instruction } = await getSystemInstruction();
+  res.json({ instruction });
+});
+
 // KB Processing Route
 app.post('/api/kb/process', async (req, res) => {
   const { type, content, id } = req.body;
@@ -309,12 +339,10 @@ async function lookupCatalog(query?: string) {
       console.error('[Firestore] Failed to fetch products:', e);
     }
   }
-  if (products.length === 0) {
+  if (products.length === 0 && !firestore) {
+    // Only show demo products if firestore is not even initialized
     products = [
-      { name: "Drisa Solar Kit 5KVA", description: "Complete solar solution for homes and offices. Includes panels, inverter, and batteries.", price: "₦1,250,000", category: "Solar" },
-      { name: "Drisa Smart CCTV 4-Cam", description: "High-definition security cameras with mobile app access and night vision.", price: "₦185,000", category: "Security" },
-      { name: "Drisa Smart Door Lock", description: "Biometric and remote access door lock for enhanced security.", price: "₦45,000", category: "Security" },
-      { name: "Drisa Solar Street Light", description: "All-in-one solar street light with motion sensor.", price: "₦35,000", category: "Solar" }
+      { name: "Demo Product 1", description: "This is a sample product.", price: "₦1,000", category: "Demo" }
     ];
   }
   if (query) {
@@ -333,9 +361,25 @@ async function sendFollowUp(contactType: string, contactAddress: string, message
   let emailResult = "Not attempted";
   let realSendSuccess = false;
 
+  // Fetch settings from Firestore
+  let waSettings: any = null;
+  let emailSettings: any = null;
+  
+  if (firestore) {
+    try {
+      const waDoc = await firestore.collection('settings').doc('whatsapp').get();
+      if (waDoc.exists) waSettings = waDoc.data();
+      
+      const emailDoc = await firestore.collection('settings').doc('email').get();
+      if (emailDoc.exists) emailSettings = emailDoc.data();
+    } catch (e) {
+      console.error('[Firestore] Error fetching settings for follow-up:', e);
+    }
+  }
+
   if (contactType === 'whatsapp') {
-    const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
-    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    const accessToken = waSettings?.accessToken || process.env.WHATSAPP_ACCESS_TOKEN;
+    const phoneNumberId = waSettings?.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID;
     if (accessToken && phoneNumberId) {
       try {
         let to = contactAddress.trim().replace(/\D/g, '');
@@ -369,13 +413,20 @@ async function sendFollowUp(contactType: string, contactAddress: string, message
   }
 
   if (contactType === 'email') {
-    const smtpUser = process.env.SMTP_USER;
-    const smtpPass = process.env.SMTP_PASS;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(contactAddress)) {
+      return { result: "FAILED: Invalid email address format." };
+    }
+    const smtpUser = emailSettings?.user || process.env.SMTP_USER;
+    const smtpPass = emailSettings?.pass || process.env.SMTP_PASS;
+    const smtpHost = emailSettings?.host || process.env.SMTP_HOST || 'smtp.gmail.com';
+    const smtpPort = emailSettings?.port || process.env.SMTP_PORT || '465';
+    
     if (smtpUser && smtpPass) {
       try {
         const transporter = nodemailer.createTransport({
-          host: process.env.SMTP_HOST || 'smtp.gmail.com',
-          port: parseInt(process.env.SMTP_PORT || '465'),
+          host: smtpHost,
+          port: parseInt(smtpPort),
           secure: true,
           auth: { user: smtpUser, pass: smtpPass },
         });
@@ -712,12 +763,14 @@ async function startServer() {
         fromNumber = data.start?.customParameters?.from || 'Unknown';
         console.log(`[Twilio] Stream started: ${streamSid} from ${fromNumber}`);
         
+        const { instruction, defaultLanguage } = await getSystemInstruction();
+        
         geminiSession = await ai.live.connect({
           model: "gemini-2.5-flash-native-audio-preview-09-2025",
           config: {
             responseModalities: [Modality.AUDIO],
             speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Charon" } } },
-            systemInstruction: SYSTEM_INSTRUCTION,
+            systemInstruction: instruction,
             outputAudioTranscription: {},
             inputAudioTranscription: {},
             tools: [{
@@ -730,6 +783,13 @@ async function startServer() {
             }]
           },
           callbacks: {
+            onopen: () => {
+              console.log('[Twilio] Gemini session opened');
+              // Initial greeting for phone call
+              geminiSession.sendRealtimeInput({
+                parts: [{ text: `Introduce yourself briefly as the DrisaTech AI Support Agent and ask how you can help. Please greet the user in ${defaultLanguage}.` }]
+              });
+            },
             onmessage: async (msg) => {
               // Handle transcriptions
               if (msg.serverContent?.modelTurn?.parts) {

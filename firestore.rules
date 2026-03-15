@@ -6,16 +6,19 @@ service cloud.firestore {
     // ===============================================================
     //
     // Collection: leads
-    // Fields: contactType, phone, email, notes, createdAt, status
+    // Fields: contactType (string), phone (string), email (string), notes (string), createdAt (timestamp), status (string)
     //
     // Collection: conversations
-    // Fields: sessionId, startTime, endTime, language, transcript, summary, outcome, clientIp, createdAt
+    // Fields: sessionId (string), startTime (string), endTime (string), language (string), transcript (list), summary (string), outcome (string), clientIp (string), createdAt (timestamp)
     //
     // Collection: products
-    // Fields: name, description, price, category, updatedAt
+    // Fields: name (string), description (string), price (string), category (string), updatedAt (timestamp)
     //
     // Collection: knowledge_sources
-    // Fields: type, content, status, createdAt
+    // Fields: type (string), content (string), status (string), createdAt (timestamp)
+    //
+    // Collection: settings
+    // Fields: varies by document (whatsapp, email, business)
     //
     // ===============================================================
 
@@ -26,18 +29,37 @@ service cloud.firestore {
     
     function isAdmin() {
       return isAuthenticated() && 
-        (request.auth.token.email == "drisatech@gmail.com");
+        (
+          (request.auth.token.email == "drisatech@gmail.com" && request.auth.token.email_verified == true) ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+        );
+    }
+
+    function isValidString(field, maxLen) {
+      return request.resource.data[field] is string && request.resource.data[field].size() <= maxLen;
+    }
+
+    // Users: Users can read/write their own profile, Admin can read/write all
+    match /users/{userId} {
+      allow read, write: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
     }
 
     // Leads: Public can create (for AI capture), Admin can read/write
     match /leads/{leadId} {
-      allow create: if true; 
+      allow create: if 
+        request.resource.data.keys().hasAll(['contactType', 'createdAt']) &&
+        isValidString('contactType', 50) &&
+        (request.resource.data.contactType in ['whatsapp', 'email', 'phone']) &&
+        request.resource.data.createdAt == request.time;
       allow read, update, delete: if isAdmin();
     }
 
     // Conversations: Public can create (for AI logging), Admin can read/write
     match /conversations/{convId} {
-      allow create: if true;
+      allow create: if 
+        request.resource.data.keys().hasAll(['sessionId', 'createdAt']) &&
+        isValidString('sessionId', 100) &&
+        request.resource.data.createdAt == request.time;
       allow read, update, delete: if isAdmin();
     }
 
