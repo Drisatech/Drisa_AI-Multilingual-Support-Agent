@@ -26,7 +26,7 @@ const DrisaLogo = ({ className }: { className?: string }) => (
     <circle cx="8" cy="20" r="1" fill="currentColor" />
   </svg>
 );
-import { auth, signInWithGoogle, db as fdb, getRedirectResult } from './firebase';
+import { auth, signInWithGoogle, signInWithGoogleRedirect, db as fdb, getRedirectResult } from './firebase';
 import { onAuthStateChanged, User, signOut } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, doc, deleteDoc, updateDoc, getDoc, setDoc, getDocFromServer } from 'firebase/firestore';
 
@@ -259,10 +259,14 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  const handleLogin = async () => {
+  const handleLogin = async (useRedirect = false) => {
     if (isLoggingIn) return;
     setIsLoggingIn(true);
     try {
+      if (useRedirect) {
+        await signInWithGoogleRedirect();
+        return;
+      }
       const user = await signInWithGoogle();
       if (user) {
         console.log("Login success for:", user.email);
@@ -272,7 +276,7 @@ export default function App() {
       if (err.code === 'auth/unauthorized-domain') {
         alert(`Domain Unauthorized: Please add ${window.location.hostname} to your Firebase Console (Authentication -> Settings -> Authorized domains). Refer to the Troubleshooting section in README.md for more details.`);
       } else if (err.code !== 'auth/cancelled-popup-request' && err.code !== 'auth/popup-closed-by-user') {
-        alert(`Login failed: ${err.message} (${err.code})`);
+        alert(`Login failed: ${err.message} (${err.code}). \n\nIf you see ERR_QUIC_PROTOCOL_ERROR, please try a different browser or disable QUIC in Chrome flags.`);
       }
     } finally {
       setIsLoggingIn(false);
@@ -688,14 +692,23 @@ export default function App() {
                 </button>
               </div>
             ) : (
-              <button 
-                onClick={handleLogin}
-                disabled={isLoggingIn}
-                className="w-full flex items-center gap-3 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors text-white text-sm disabled:opacity-50"
-              >
-                <LogIn className="w-4 h-4" />
-                {isLoggingIn ? 'Logging in...' : 'Admin Login'}
-              </button>
+              <div className="space-y-3">
+                <button 
+                  onClick={() => handleLogin(false)}
+                  disabled={isLoggingIn}
+                  className="w-full flex items-center gap-3 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors text-white text-sm disabled:opacity-50"
+                >
+                  <LogIn className="w-4 h-4" />
+                  {isLoggingIn ? 'Logging in...' : 'Admin Login'}
+                </button>
+                <button 
+                  onClick={() => handleLogin(true)}
+                  disabled={isLoggingIn}
+                  className="w-full text-[10px] text-white/40 hover:text-white/60 transition-colors uppercase tracking-widest text-center"
+                >
+                  Trouble logging in? Try Redirect
+                </button>
+              </div>
             )}
           </div>
         </aside>

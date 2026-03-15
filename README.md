@@ -239,6 +239,21 @@ If you encounter errors like `ERR_QUIC_PROTOCOL_ERROR` or `auth/unauthorized-dom
     2. Select your project.
     3. Go to **Authentication** > **Settings** > **Authorized domains**.
     4. Add your Cloud Run URL (e.g., `drisa-ai-agent-448742322230.us-central1.run.app`).
+*   **API Key Restrictions**: If login still fails, check your API Key restrictions in the Google Cloud Console.
+    1. Go to [Google Cloud Console Credentials](https://console.cloud.google.com/apis/credentials).
+    2. Find the API Key used by your Firebase project (usually named "Browser key" or similar).
+    3. **Website restrictions**: Ensure this is set to **None** or includes your domains.
+    4. **API restrictions**: If you have "Restrict key" selected, ensure the following APIs are in the allowed list:
+        *   **Identity Toolkit API** (Required for Firebase Auth)
+        *   **Token Service API** (Required for Firebase Auth)
+        *   **Cloud Firestore API** (Required for Database)
+        *   **Cloud Storage JSON API** (If using storage)
+    5. If any of these are missing from your list of 25 APIs, the key will be rejected by Firebase.
+*   **Enable Google Provider**: Ensure Google is enabled as a sign-in provider.
+    1. Go to [Firebase Console](https://console.firebase.google.com/).
+    2. Go to **Authentication** > **Sign-in method**.
+    3. Click **Add new provider** and select **Google**.
+    4. Enable it and save.
 *   **Browser Protocol Error**: If you see `ERR_QUIC_PROTOCOL_ERROR`, it's a browser-level issue with the QUIC protocol.
     *   Try a different browser (e.g., Firefox or Safari).
     *   In Chrome, you can temporarily disable QUIC by visiting `chrome://flags/#enable-quic` and setting it to **Disabled**.

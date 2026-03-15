@@ -14,7 +14,7 @@ setPersistence(auth, browserLocalPersistence).catch(err => console.error("Persis
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-// Auth helper
+// Auth helpers
 export const signInWithGoogle = async () => {
   try {
     console.log("Attempting signInWithPopup...");
@@ -24,16 +24,25 @@ export const signInWithGoogle = async () => {
   } catch (error: any) {
     console.warn("Popup sign-in failed:", error.code, error.message);
     
-    // If popup is blocked, try redirect
-    if (error.code === 'auth/popup-blocked' || error.code === 'auth/cancelled-popup-request' || error.code === 'auth/popup-closed-by-user') {
-      console.log("Triggering signInWithRedirect...");
+    // If popup is blocked or specific errors occur, try redirect
+    if (
+      error.code === 'auth/popup-blocked' || 
+      error.code === 'auth/cancelled-popup-request' || 
+      error.code === 'auth/popup-closed-by-user' ||
+      error.code === 'auth/network-request-failed'
+    ) {
+      console.log("Triggering signInWithRedirect as fallback...");
       await signInWithRedirect(auth, googleProvider);
-      // The page will redirect, so we don't need to return anything here
       return null;
     }
     
     throw error;
   }
+};
+
+export const signInWithGoogleRedirect = async () => {
+  console.log("Triggering explicit signInWithRedirect...");
+  await signInWithRedirect(auth, googleProvider);
 };
 
 export { collection, addDoc, serverTimestamp, query, orderBy, onSnapshot, doc, getRedirectResult };
