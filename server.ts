@@ -13,17 +13,35 @@ import { db } from './db.js';
 import { Firestore } from '@google-cloud/firestore';
 import pkg from 'wavefile';
 const { WaveFile } = pkg;
-import firebaseConfig from './firebase-applet-config.json' assert { type: 'json' };
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Load Firebase configuration safely
+let firebaseConfig: any = {};
+try {
+  const configPath = path.resolve(__dirname, 'firebase-applet-config.json');
+  if (fs.existsSync(configPath)) {
+    firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    console.log('[Server] Firebase config loaded successfully');
+  } else {
+    console.warn('[Server] WARNING: firebase-applet-config.json not found. Using empty config.');
+  }
+} catch (err) {
+  console.error('[Server] ERROR loading firebase-applet-config.json:', err);
+}
+
 let firestore: Firestore;
 try {
-  firestore = new Firestore({
-    projectId: firebaseConfig.projectId,
-    databaseId: firebaseConfig.firestoreDatabaseId
-  });
+  if (firebaseConfig.projectId) {
+    firestore = new Firestore({
+      projectId: firebaseConfig.projectId,
+      databaseId: firebaseConfig.firestoreDatabaseId
+    });
+    console.log('[Server] Firestore initialized');
+  } else {
+    console.warn('[Server] WARNING: No Firestore project ID found. Firestore disabled.');
+    firestore = null as any;
+  }
 } catch (e) {
   console.error("Firestore initialization failed:", e);
   firestore = null as any;
@@ -31,26 +49,33 @@ try {
 
 const app = express();
 app.set('trust proxy', true);
-const PORT = Number(process.env.PORT) || 3000;
+
+// In AI Studio, we MUST listen on port 3000.
+// In external Cloud Run, we MUST listen on the port provided by the PORT environment variable (usually 8080).
+// We detect AI Studio by the presence of the APPLET_ID environment variable.
+const PORT = (process.env.APPLET_ID) ? 3000 : (Number(process.env.PORT) || 8080);
+
+console.log(`[Server] Starting up...`);
+console.log(`[Server] Environment: ${process.env.NODE_ENV}`);
+console.log(`[Server] PORT: ${PORT} (Source: ${process.env.APPLET_ID ? 'AI Studio Override' : (process.env.PORT ? 'Env Var' : 'Default')})`);
 
 const SYSTEM_INSTRUCTION = `You are Drisa, a professional Nigerian AI Sales & Support Agent for DrisaTech (https://drisatech.com.ng).
 
 LANGUAGE & MULTILINGUAL RULES:
-- You are exceptionally fluent in English, Hausa, Igbo, Yoruba, and Nigerian Pidgin.
-- DYNAMIC LANGUAGE DETECTION: You MUST automatically detect the language spoken by the caller and respond in that EXACT same language immediately.
-- ACCENT SENSITIVITY: You are highly skilled at understanding various Nigerian accents and dialects across all supported languages, including regional variations in Hausa, Igbo, Yoruba, and Pidgin.
-- If the user speaks Hausa, you respond in Hausa. If they speak Igbo, you respond in Igbo. If they speak Yoruba, you respond in Yoruba. If they speak Nigerian Pidgin, you respond in Nigerian Pidgin.
-- CODE-SWITCHING: If the user mixes languages (e.g., English and Yoruba), you should respond in a way that feels natural, matching their linguistic style while maintaining professionalism.
-- If the user switches languages mid-conversation, you MUST switch with them instantly without hesitation.
+- You are fluent in English, Hausa, Igbo, Yoruba, and Nigerian Pidgin.
+- CRITICAL: You MUST respond in the EXACT SAME language the user is speaking. If they speak Hausa, you respond in Hausa. If they speak Igbo, you respond in Igbo. If they speak Yoruba, you respond in Yoruba. If they speak Nigerian Pidgin, you respond in Nigerian Pidgin.
+- You have a native-level understanding of Nigerian accents and dialects.
+- If the user switches languages mid-conversation, you MUST switch with them immediately and seamlessly.
+- For the initial greeting, use a warm, multilingual Nigerian approach if the preferred language is not strictly specified.
 
 TONE & VOICE:
 - Speak with a warm, respectful, and rhythmic Nigerian professional tone.
 - Use polite Nigerian English honorifics like "Sir" or "Ma" when appropriate.
-- Your cadence should be engaging, helpful, and clear, reflecting the warmth of Nigerian hospitality.
-- When speaking Nigerian Pidgin, Hausa, Igbo, or Yoruba, be authentic, natural, and friendly. Avoid sounding like a robotic translator.
+- Your cadence should be engaging, helpful, and clear.
+- When speaking Nigerian Pidgin, Hausa, Igbo, or Yoruba, be authentic, natural, and friendly.
 
 CONVERSATION RULES:
-1. Keep responses VERY CONCISE (1-2 sentences) to ensure extremely low latency and keep the flow natural for a phone call.
+1. Keep responses VERY CONCISE (1-2 sentences) to reduce latency and keep the flow natural.
 2. If you need to look up information, tell the user: "Just a moment while I check that for you, Sir/Ma."
 3. Use 'lookupCatalog' for product inquiries. If the catalog is empty, use your knowledge of DrisaTech (Solar, CCTV, Smart Home).
 4. Use 'sendFollowUp' to capture contact details and send real messages. You MUST call this tool as soon as the user provides their email or WhatsApp number.
@@ -59,7 +84,7 @@ CONVERSATION RULES:
 7. IMPORTANT: If the user types their contact info in the text box, acknowledge it and call 'sendFollowUp'.
 8. Use 'bookAppointment' to schedule meetings or site visits for the business owner. Always confirm the date and time with the user before booking.
 
-Goal: Provide expert advice on DrisaTech products with a rhythmic Nigerian flair in whatever language the user chooses to speak.`;
+Goal: Provide expert advice on DrisaTech products with a rhythmic Nigerian flair in the user's language of choice.`;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -274,6 +299,205 @@ app.post('/api/kb/process', async (req, res) => {
   }
 });
 
+// --- Tool Implementations ---
+async function lookupCatalog(query?: string) {
+  let products: any[] = [];
+  if (firestore) {
+    try {
+      const snapshot = await firestore.collection('products').get();
+      products = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    } catch (e) {
+      console.error('[Firestore] Failed to fetch products:', e);
+    }
+  }
+  if (products.length === 0) {
+    products = [
+      { name: "Drisa Solar Kit 5KVA", description: "Complete solar solution for homes and offices. Includes panels, inverter, and batteries.", price: "₦1,250,000", category: "Solar" },
+      { name: "Drisa Smart CCTV 4-Cam", description: "High-definition security cameras with mobile app access and night vision.", price: "₦185,000", category: "Security" },
+      { name: "Drisa Smart Door Lock", description: "Biometric and remote access door lock for enhanced security.", price: "₦45,000", category: "Security" },
+      { name: "Drisa Solar Street Light", description: "All-in-one solar street light with motion sensor.", price: "₦35,000", category: "Solar" }
+    ];
+  }
+  if (query) {
+    const lowerQuery = query.toLowerCase();
+    products = products.filter(p => 
+      (p.name && p.name.toLowerCase().includes(lowerQuery)) || 
+      (p.description && p.description.toLowerCase().includes(lowerQuery)) ||
+      (p.category && p.category.toLowerCase().includes(lowerQuery))
+    );
+  }
+  return { result: products, count: products.length };
+}
+
+async function sendFollowUp(contactType: string, contactAddress: string, message: string) {
+  let whatsappResult = "Not attempted";
+  let emailResult = "Not attempted";
+  let realSendSuccess = false;
+
+  if (contactType === 'whatsapp') {
+    const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    if (accessToken && phoneNumberId) {
+      try {
+        let to = contactAddress.trim().replace(/\D/g, '');
+        if (to.length <= 11 && !to.startsWith('234')) {
+          to = '234' + (to.startsWith('0') ? to.substring(1) : to);
+        }
+        const response = await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to: to,
+            type: "text",
+            text: { preview_url: false, body: message }
+          })
+        });
+        if (response.ok) {
+          whatsappResult = "SUCCESS: Real WhatsApp message sent.";
+          realSendSuccess = true;
+        } else {
+          const data = await response.json() as any;
+          whatsappResult = `FAILED: Meta API error - ${data.error?.message || response.statusText}`;
+        }
+      } catch (err) {
+        whatsappResult = "FAILED: Network error - " + (err instanceof Error ? err.message : String(err));
+      }
+    } else {
+      whatsappResult = "FAILED: Meta WhatsApp credentials missing.";
+    }
+  }
+
+  if (contactType === 'email') {
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS;
+    if (smtpUser && smtpPass) {
+      try {
+        const transporter = nodemailer.createTransport({
+          host: process.env.SMTP_HOST || 'smtp.gmail.com',
+          port: parseInt(process.env.SMTP_PORT || '465'),
+          secure: true,
+          auth: { user: smtpUser, pass: smtpPass },
+        });
+        await transporter.sendMail({
+          from: `"${process.env.SMTP_FROM_NAME || 'Drisa AI Agent'}" <${smtpUser}>`,
+          to: contactAddress,
+          subject: "Follow-up from Drisa",
+          text: message,
+          html: `<p>${message.replace(/\n/g, '<br>')}</p>`,
+        });
+        emailResult = "SUCCESS: Real Email sent.";
+        realSendSuccess = true;
+      } catch (err) {
+        emailResult = "FAILED: SMTP error - " + (err instanceof Error ? err.message : String(err));
+      }
+    } else {
+      emailResult = "FAILED: Email credentials missing.";
+    }
+  }
+
+  if (firestore) {
+    try {
+      await firestore.collection('leads').add({
+        contactType,
+        phone: contactType === 'whatsapp' ? contactAddress : '',
+        email: contactType === 'email' ? contactAddress : '',
+        notes: message,
+        createdAt: new Date().toISOString(),
+        status: 'new',
+        realSendSuccess
+      });
+    } catch (e) {
+      console.error('[Firestore] Failed to save lead:', e);
+    }
+  }
+  return { result: contactType === 'whatsapp' ? whatsappResult : emailResult };
+}
+
+async function checkServiceStatus() {
+  const googleCalendarTokens = await getGoogleCalendarTokens();
+  return {
+    result: {
+      whatsapp: {
+        configured: !!(process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID),
+        details: process.env.WHATSAPP_ACCESS_TOKEN ? "Token present" : "Token missing"
+      },
+      email: {
+        configured: !!(process.env.SMTP_USER && process.env.SMTP_PASS),
+        details: process.env.SMTP_USER ? `User: ${process.env.SMTP_USER}` : "Credentials missing"
+      },
+      googleCalendar: {
+        configured: !!googleCalendarTokens,
+        details: googleCalendarTokens ? "Connected" : "Not Connected"
+      }
+    }
+  };
+}
+
+async function bookAppointment(summary: string, description: string, startTime: string, endTime: string) {
+  try {
+    const tokens = await getGoogleCalendarTokens();
+    if (!tokens) return { error: "Google Calendar is not connected." };
+    const client = getOAuth2Client();
+    client.setCredentials(tokens);
+    const calendar = google.calendar({ version: 'v3', auth: client });
+    const response = await calendar.events.insert({
+      calendarId: 'primary',
+      requestBody: { summary, description, start: { dateTime: startTime }, end: { dateTime: endTime } },
+    });
+    return { success: true, link: response.data.htmlLink };
+  } catch (err) {
+    return { error: "Failed to book appointment: " + (err instanceof Error ? err.message : String(err)) };
+  }
+}
+
+// --- Tool API Routes ---
+app.post('/api/tools/lookupCatalog', async (req, res) => {
+  const result = await lookupCatalog(req.body.query);
+  res.json(result);
+});
+
+app.post('/api/tools/sendFollowUp', async (req, res) => {
+  const { contactType, contactAddress, message } = req.body;
+  if (!contactType || !contactAddress || !message) {
+    return res.status(400).json({ error: "Missing required arguments" });
+  }
+  const result = await sendFollowUp(contactType, contactAddress, message);
+  res.json(result);
+});
+
+app.post('/api/tools/checkServiceStatus', async (req, res) => {
+  const result = await checkServiceStatus();
+  res.json(result);
+});
+
+app.post('/api/tools/bookAppointment', async (req, res) => {
+  const { summary, description, startTime, endTime } = req.body;
+  const result = await bookAppointment(summary, description, startTime, endTime);
+  res.json(result);
+});
+
+app.post('/api/sessions/log', async (req, res) => {
+  const { transcript, startTime, endTime, preferredLanguage } = req.body;
+  if (firestore) {
+    try {
+      await firestore.collection('sessions').add({
+        transcript,
+        startTime,
+        endTime,
+        preferredLanguage,
+        createdAt: new Date().toISOString()
+      });
+      res.json({ success: true });
+    } catch (e) {
+      res.status(500).json({ error: 'Failed to log session' });
+    }
+  } else {
+    res.status(500).json({ error: 'Database not initialized' });
+  }
+});
+
 // Twilio Voice Webhook
 app.post('/api/twilio/voice', (req, res) => {
   console.log(`[Twilio] Webhook received: ${req.method} ${req.url}`);
@@ -402,8 +626,41 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(__dirname, 'dist');
+    const distPath = path.resolve(process.cwd(), 'dist');
+    console.log(`[Server] Production mode. Serving static files from: ${distPath}`);
+    
+    // Explicit route for the agent identity image - MOVED ABOVE express.static
+    // to ensure it's handled with correct headers and priority
+    app.get('/agent-identity.png', (req, res) => {
+      const possiblePaths = [
+        path.resolve(distPath, 'agent-identity.png'),
+        path.resolve(process.cwd(), 'public', 'agent-identity.png'),
+        path.resolve(process.cwd(), 'agent-identity.png')
+      ];
+      
+      console.log(`[Server] Request for /agent-identity.png. Checking possible paths...`);
+      
+      for (const imgPath of possiblePaths) {
+        if (fs.existsSync(imgPath)) {
+          console.log(`[Server] Image found at: ${imgPath}. Sending with Cache-Control.`);
+          res.setHeader('Content-Type', 'image/png');
+          res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+          return res.sendFile(imgPath);
+        }
+      }
+      
+      console.error(`[Server] ERROR: Image NOT FOUND in any of: ${possiblePaths.join(', ')}`);
+      res.status(404).send('Agent identity image not found');
+    });
+
+    if (fs.existsSync(distPath)) {
+      const contents = fs.readdirSync(distPath);
+      console.log(`[Server] dist folder exists. Contents: ${contents.join(', ')}`);
+    } else {
+      console.error(`[Server] ERROR: dist folder NOT FOUND at ${distPath}`);
+    }
     app.use(express.static(distPath));
+
     app.get('*', (req, res) => {
       const indexPath = path.join(distPath, 'index.html');
       if (fs.existsSync(indexPath)) {
@@ -451,549 +708,91 @@ async function startServer() {
       console.error('[Upgrade] Error during upgrade:', err);
       socket.destroy();
     }
-  });
-
-  // Twilio Stream Handler (Mu-law 8000Hz)
+  });  // Twilio Stream Handler (Mu-law 8000Hz)
   twilioWss.on('connection', (ws: WebSocket) => {
-    const clientIp = (ws as any).clientIp || 'unknown';
-    console.log(`[Twilio] New stream connection from ${clientIp}`);
-    setupGeminiProxy(
-      ws, 
-      'audio/pcm;rate=16000', 
-      (data) => mulawToPcm16(data.media.payload), 
-      (payload, streamSid) => JSON.stringify({ event: 'media', streamSid, media: { payload: pcmToMulaw(payload) } }),
-      clientIp
-    );
-  });
+    console.log(`[Twilio] New stream connection`);
+    let streamSid: string;
+    let geminiSession: any;
 
-  // Browser Stream Handler (PCM 16000Hz)
-  browserWss.on('connection', (ws: WebSocket) => {
-    const clientIp = (ws as any).clientIp || 'unknown';
-    console.log(`[Browser] New stream connection from ${clientIp}`);
-    setupGeminiProxy(ws, 'audio/pcm;rate=16000', (data) => data.audio, (payload) => JSON.stringify({ event: 'audio', audio: payload }), clientIp);
-  });
+    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY;
+    if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+      console.error('[Twilio] Gemini API Key is missing');
+      ws.close();
+      return;
+    }
 
-  async function setupGeminiProxy(ws: WebSocket, mimeType: string, getPayload: (data: any) => string, createMessage: (payload: string, streamSid?: string) => string, clientIp: string) {
-    let streamSid: string | null = null;
-    let geminiSession: any = null;
-    let isConnectingGemini = false;
-    let preferredLanguage: string = 'English';
-    let transcript: { role: string, text: string, timestamp: string }[] = [];
-    let startTime = new Date().toISOString();
-    let audioOutputBuffer = Buffer.alloc(0);
-    
-    const connectToGemini = async () => {
-      const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY;
-      if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
-        console.error('[Gemini] API Key is missing or set to placeholder. Please check your environment variables.');
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ 
-            event: 'error', 
-            message: 'Gemini API Key is missing or invalid. Please configure GEMINI_API_KEY in the Secrets panel.' 
-          }));
-          ws.close();
-        }
-        return;
-      }
-      console.log(`[Gemini] Using API Key (first 4): ${apiKey.substring(0, 4)}...`);
-      const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ apiKey });
 
-      if (isConnectingGemini || geminiSession) return;
-      isConnectingGemini = true;
-      
-      try {
-        const modelName = "gemini-2.5-flash-native-audio-preview-09-2025";
-        console.log(`[Gemini] Connecting to Live API with model ${modelName}...`);
-        const sessionPromise = ai.live.connect({
-          model: modelName,
+    ws.on('message', async (message: any) => {
+      const data = JSON.parse(message.toString());
+      if (data.event === 'start') {
+        streamSid = data.streamSid;
+        console.log(`[Twilio] Stream started: ${streamSid}`);
+        
+        geminiSession = await ai.live.connect({
+          model: "gemini-2.5-flash-native-audio-preview-09-2025",
           config: {
             responseModalities: [Modality.AUDIO],
-            speechConfig: {
-              voiceConfig: { prebuiltVoiceConfig: { voiceName: "Charon" } },
-            },
-            systemInstruction: preferredLanguage === 'English' 
-              ? `${SYSTEM_INSTRUCTION}\n\nNote: The conversation is starting in English, but you MUST be ready to switch to Hausa, Igbo, Yoruba, or Nigerian Pidgin immediately if the user speaks them. Be highly sensitive to Nigerian accents and linguistic nuances.`
-              : `${SYSTEM_INSTRUCTION}\n\nIMPORTANT: The user has selected ${preferredLanguage} as their preferred language. You MUST start the conversation in ${preferredLanguage} and strictly follow the dynamic language switching rules if the user changes language.`,
-            inputAudioTranscription: {},
-            outputAudioTranscription: {},
+            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Charon" } } },
+            systemInstruction: SYSTEM_INSTRUCTION,
             tools: [{
               functionDeclarations: [
-                {
-                  name: "lookupCatalog",
-                  description: "Search the product catalog for items matching the customer's request.",
-                  parameters: {
-                    type: Type.OBJECT,
-                    properties: {
-                      query: {
-                        type: Type.STRING,
-                        description: "The search query (e.g., 'solar', 'generator', 'camera'). Leave empty to get all products."
-                      }
-                    }
-                  }
-                },
-                {
-                  name: "sendFollowUp",
-                  description: "Send a follow-up message with product details to the customer via WhatsApp or Email.",
-                  parameters: {
-                    type: Type.OBJECT,
-                    properties: {
-                      contactType: {
-                        type: Type.STRING,
-                        description: "Either 'whatsapp' or 'email'"
-                      },
-                      contactAddress: {
-                        type: Type.STRING,
-                        description: "The phone number or email address provided by the customer"
-                      },
-                      message: {
-                        type: Type.STRING,
-                        description: "The formatted message containing product details, links, and prices to send."
-                      }
-                    },
-                    required: ["contactType", "contactAddress", "message"]
-                  }
-                },
-                {
-                  name: "checkServiceStatus",
-                  description: "Check if the messaging services (WhatsApp/Email) are correctly configured with API keys.",
-                  parameters: {
-                    type: Type.OBJECT,
-                    properties: {}
-                  }
-                },
-                {
-                  name: "bookAppointment",
-                  description: "Schedule a meeting or site visit for the business owner. Always confirm the date and time with the user before booking.",
-                  parameters: {
-                    type: Type.OBJECT,
-                    properties: {
-                      summary: {
-                        type: Type.STRING,
-                        description: "The title of the appointment (e.g., 'Solar Installation Site Visit')."
-                      },
-                      description: {
-                        type: Type.STRING,
-                        description: "Additional details about the appointment, including customer name and contact info."
-                      },
-                      startTime: {
-                        type: Type.STRING,
-                        description: "The start time of the appointment in ISO 8601 format (e.g., '2026-03-15T10:00:00Z')."
-                      },
-                      endTime: {
-                        type: Type.STRING,
-                        description: "The end time of the appointment in ISO 8601 format (e.g., '2026-03-15T11:00:00Z')."
-                      }
-                    },
-                    required: ["summary", "startTime", "endTime"]
-                  }
-                }
+                { name: "lookupCatalog", parameters: { type: Type.OBJECT, properties: { query: { type: Type.STRING } } } },
+                { name: "sendFollowUp", parameters: { type: Type.OBJECT, properties: { contactType: { type: Type.STRING }, contactAddress: { type: Type.STRING }, message: { type: Type.STRING } }, required: ["contactType", "contactAddress", "message"] } },
+                { name: "checkServiceStatus", parameters: { type: Type.OBJECT, properties: {} } },
+                { name: "bookAppointment", parameters: { type: Type.OBJECT, properties: { summary: { type: Type.STRING }, description: { type: Type.STRING }, startTime: { type: Type.STRING }, endTime: { type: Type.STRING } }, required: ["summary", "startTime", "endTime"] } }
               ]
             }]
           },
           callbacks: {
-            onopen: () => {
-              console.log('[Gemini] Connected');
-            },
-            onmessage: async (message) => {
-              // console.log('[Gemini] Message received:', JSON.stringify(message).substring(0, 200) + '...');
-              
-              if (message.serverContent?.interrupted) {
-                console.log('[Gemini] Model interrupted');
-                ws.send(JSON.stringify({ event: 'interrupted' }));
-              }
-
-              // Handle transcriptions and audio
-              if (message.serverContent?.modelTurn) {
-                for (const part of message.serverContent.modelTurn.parts) {
-                  if (part.text) {
-                    const text = part.text;
-                    transcript.push({ role: 'AI', text, timestamp: new Date().toISOString() });
-                    ws.send(JSON.stringify({ event: 'transcript', role: 'AI', text }));
-                  }
-                  if (part.inlineData && part.inlineData.mimeType.includes('audio')) {
-                    const base64Audio = part.inlineData.data;
-                    if (base64Audio && ws.readyState === WebSocket.OPEN) {
-                      // console.log(`[Gemini] Sending audio chunk to ${streamSid ? 'Twilio' : 'Browser'}`);
-                      ws.send(createMessage(base64Audio, streamSid || undefined));
-                    }
+            onmessage: async (msg) => {
+              if (msg.serverContent?.modelTurn?.parts) {
+                for (const part of msg.serverContent.modelTurn.parts) {
+                  if (part.inlineData?.data) {
+                    const mulaw = pcmToMulaw(part.inlineData.data);
+                    if (mulaw) ws.send(JSON.stringify({ event: 'media', streamSid, media: { payload: mulaw } }));
                   }
                 }
               }
-
-              const userTurn = (message.serverContent as any)?.userTurn;
-              if (userTurn) {
-                const text = (userTurn.parts as any[]).find(p => p.text)?.text;
-                if (text) {
-                  transcript.push({ role: 'Customer', text, timestamp: new Date().toISOString() });
-                  ws.send(JSON.stringify({ event: 'transcript', role: 'Customer', text }));
-                }
-              }
-
-              if (message.toolCall?.functionCalls) {
-                console.log(`[Gemini] Tool calls received:`, JSON.stringify(message.toolCall.functionCalls));
-                const responses = await Promise.all(message.toolCall.functionCalls.map(async (call) => {
-                  if (call.name === 'lookupCatalog') {
-                    const query = (call.args as any)?.query || '';
-                    let products: any[] = [];
-                    
-                    if (firestore) {
-                      try {
-                        const snapshot = await firestore.collection('products').get();
-                        products = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                        console.log(`[Catalog] Found ${products.length} products in database`);
-                      } catch (e) {
-                        console.error('[Firestore] Failed to fetch products:', e);
-                      }
-                    }
-
-                    // Fallback catalog if database is empty
-                    if (products.length === 0) {
-                      console.log('[Catalog] Using fallback data');
-                      products = [
-                        { name: "Drisa Solar Kit 5KVA", description: "Complete solar solution for homes and offices. Includes panels, inverter, and batteries.", price: "₦1,250,000", category: "Solar" },
-                        { name: "Drisa Smart CCTV 4-Cam", description: "High-definition security cameras with mobile app access and night vision.", price: "₦185,000", category: "Security" },
-                        { name: "Drisa Smart Door Lock", description: "Biometric and remote access door lock for enhanced security.", price: "₦45,000", category: "Security" },
-                        { name: "Drisa Solar Street Light", description: "All-in-one solar street light with motion sensor.", price: "₦35,000", category: "Solar" }
-                      ];
-                    }
-                    
-                    if (query) {
-                      const lowerQuery = query.toLowerCase();
-                      products = products.filter(p => 
-                        (p.name && p.name.toLowerCase().includes(lowerQuery)) || 
-                        (p.description && p.description.toLowerCase().includes(lowerQuery)) ||
-                        (p.category && p.category.toLowerCase().includes(lowerQuery))
-                      );
-                    }
-                    
-                    return { id: call.id, name: call.name, response: { result: products, count: products.length } };
-                  } else if (call.name === 'sendFollowUp') {
-                    const args = call.args as any;
-                    const contactType = args.contactType || args.contact_type;
-                    const contactAddress = args.contactAddress || args.contact_address;
-                    const msg = args.message || args.msg;
-                    
-                    console.log(`[Follow-up Tool] Called with: type=${contactType}, address=${contactAddress}`);
-                    console.log(`[Follow-up Tool] Message length: ${msg?.length || 0}`);
-                    
-                    if (!contactType || !contactAddress || !msg) {
-                      console.error('[Follow-up Tool] Missing arguments');
-                      return { id: call.id, name: call.name, response: { error: "Missing required arguments: contactType, contactAddress, or message" } };
-                    }
-
-                    let whatsappResult = "Not attempted";
-                    let emailResult = "Not attempted";
-                    let realSendSuccess = false;
-
-                    // Attempt to send real WhatsApp message if configured via Meta WhatsApp Business API
-                    if (contactType === 'whatsapp') {
-                      const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
-                      const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-
-                      if (accessToken && phoneNumberId) {
-                        try {
-                          // Clean the phone number: remove non-digits
-                          let to = contactAddress.trim().replace(/\D/g, '');
-                          
-                          // If it doesn't start with a country code (assuming Nigeria +234 as default if it's short)
-                          if (to.length <= 11 && !to.startsWith('234')) {
-                            to = '234' + (to.startsWith('0') ? to.substring(1) : to);
-                          }
-
-                          const response = await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
-                            method: 'POST',
-                            headers: {
-                              'Authorization': `Bearer ${accessToken}`,
-                              'Content-Type': 'application/json',
-                            },
-                            body: JSON.stringify({
-                              messaging_product: "whatsapp",
-                              recipient_type: "individual",
-                              to: to,
-                              type: "text",
-                              text: {
-                                preview_url: false,
-                                body: msg
-                              }
-                            })
-                          });
-
-                          const data = await response.json() as any;
-                          console.log(`[Meta WhatsApp] API Response Status: ${response.status}`);
-                          
-                          if (response.ok) {
-                            console.log(`[Meta WhatsApp] Message sent successfully: ${data.messages?.[0]?.id}`);
-                            whatsappResult = "SUCCESS: Real WhatsApp message sent via Meta API.";
-                            realSendSuccess = true;
-                          } else {
-                            console.error('[Meta WhatsApp] API Error Details:', JSON.stringify(data));
-                            const errorMsg = data.error?.message || response.statusText;
-                            whatsappResult = `FAILED: Meta API error - ${errorMsg}. Note: Meta requires users to message the business first within 24 hours for free-form messages.`;
-                          }
-                        } catch (err) {
-                          console.error('[Meta WhatsApp] Error sending WhatsApp:', err);
-                          whatsappResult = "FAILED: Network or system error - " + (err instanceof Error ? err.message : String(err));
-                        }
-                      } else {
-                        console.log('[Meta WhatsApp] Credentials missing.');
-                        whatsappResult = "FAILED: Meta WhatsApp credentials (WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID) are missing in the server environment.";
-                      }
-                    }
-
-                    // Attempt to send real Email if configured
-                    if (contactType === 'email') {
-                      const smtpUser = process.env.SMTP_USER;
-                      const smtpPass = process.env.SMTP_PASS;
-                      const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
-                      const smtpPort = parseInt(process.env.SMTP_PORT || '465');
-
-                      if (smtpUser && smtpPass) {
-                        try {
-                          const transporter = nodemailer.createTransport({
-                            host: smtpHost,
-                            port: smtpPort,
-                            secure: smtpPort === 465,
-                            auth: {
-                              user: smtpUser,
-                              pass: smtpPass,
-                            },
-                          });
-
-                          const info = await transporter.sendMail({
-                            from: `"${process.env.SMTP_FROM_NAME || 'Drisa AI Agent'}" <${smtpUser}>`,
-                            to: contactAddress,
-                            subject: "Follow-up from Drisa",
-                            text: msg,
-                            html: `<p>${msg.replace(/\n/g, '<br>')}</p>`,
-                          });
-
-                          console.log(`[Email] Message sent: ${info.messageId}`);
-                          emailResult = "SUCCESS: Real Email sent successfully.";
-                          realSendSuccess = true;
-                        } catch (err) {
-                          console.error('[Email] Error sending email:', err);
-                          emailResult = "FAILED: SMTP error - " + (err instanceof Error ? err.message : String(err));
-                        }
-                      } else {
-                        console.log('[Email] SMTP credentials missing.');
-                        emailResult = "FAILED: Email credentials (SMTP_USER or SMTP_PASS) are missing in the server environment.";
-                      }
-                    }
-
-                    if (firestore) {
-                      try {
-                        await firestore.collection('leads').add({
-                          contactType,
-                          phone: contactType === 'whatsapp' ? contactAddress : '',
-                          email: contactType === 'email' ? contactAddress : '',
-                          notes: msg,
-                          createdAt: new Date().toISOString(),
-                          status: 'new',
-                          realSendSuccess
-                        });
-                        console.log(`[Firestore] Lead saved: ${contactAddress}`);
-                      } catch (e) {
-                        console.error('[Firestore] Failed to save lead:', e);
-                      }
-                    }
-                    
-                    const finalResult = contactType === 'whatsapp' ? whatsappResult : emailResult;
-                    return { id: call.id, name: call.name, response: { result: finalResult } };
-                  } else if (call.name === 'checkServiceStatus') {
-                    const googleCalendarTokens = await getGoogleCalendarTokens();
-                    const status = {
-                      whatsapp: {
-                        configured: !!(process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID),
-                        details: process.env.WHATSAPP_ACCESS_TOKEN ? "Token present" : "Token missing"
-                      },
-                      email: {
-                        configured: !!(process.env.SMTP_USER && process.env.SMTP_PASS),
-                        details: process.env.SMTP_USER ? `User: ${process.env.SMTP_USER}` : "Credentials missing"
-                      },
-                      googleCalendar: {
-                        configured: !!googleCalendarTokens,
-                        details: googleCalendarTokens ? "Connected" : "Not Connected"
-                      }
-                    };
-                    return { id: call.id, name: call.name, response: { result: status } };
-                  } else if (call.name === 'bookAppointment') {
-                    const { summary, description, startTime, endTime } = call.args as any;
-                    console.log(`[Calendar Tool] Booking appointment: ${summary} at ${startTime}`);
-                    
-                    try {
-                      const tokens = await getGoogleCalendarTokens();
-                      if (!tokens) {
-                        return { id: call.id, name: call.name, response: { error: "Google Calendar is not connected. Please ask the admin to connect it in the dashboard." } };
-                      }
-                      
-                      const client = getOAuth2Client();
-                      client.setCredentials(tokens);
-                      const calendar = google.calendar({ version: 'v3', auth: client });
-                      
-                      const event = {
-                        summary,
-                        description,
-                        start: { dateTime: startTime },
-                        end: { dateTime: endTime },
-                      };
-                      
-                      const response = await calendar.events.insert({
-                        calendarId: 'primary',
-                        requestBody: event,
-                      });
-                      
-                      console.log(`[Calendar Tool] Event created: ${response.data.htmlLink}`);
-                      return { id: call.id, name: call.name, response: { success: true, link: response.data.htmlLink } };
-                    } catch (err) {
-                      console.error('[Calendar Tool] Error booking appointment:', err);
-                      return { id: call.id, name: call.name, response: { error: "Failed to book appointment: " + (err instanceof Error ? err.message : String(err)) } };
-                    }
-                  }
-                  return { id: call.id, name: call.name, response: { error: "Unknown function" } };
+              if (msg.toolCall?.functionCalls) {
+                const responses = await Promise.all(msg.toolCall.functionCalls.map(async (call) => {
+                  let result;
+                  const args = call.args as any;
+                  if (call.name === 'lookupCatalog') result = await lookupCatalog(args.query);
+                  else if (call.name === 'sendFollowUp') result = await sendFollowUp(args.contactType, args.contactAddress, args.message);
+                  else if (call.name === 'checkServiceStatus') result = await checkServiceStatus();
+                  else if (call.name === 'bookAppointment') result = await bookAppointment(args.summary, args.description, args.startTime, args.endTime);
+                  return { id: call.id, name: call.name, response: result };
                 }));
-                sessionPromise.then(s => s.sendToolResponse({ functionResponses: responses }));
+                geminiSession.sendToolResponse({ functionResponses: responses });
               }
-            },
-            onerror: (err) => { 
-              console.error('[Gemini] Error details:', JSON.stringify(err)); 
-              console.error('[Gemini] Error message:', err.message);
-              ws.send(JSON.stringify({ event: 'error', message: 'Gemini connection error' }));
-              ws.close(); 
-            },
-            onclose: (event) => { 
-              console.log('[Gemini] Closed. Event:', JSON.stringify(event)); 
-              ws.close(); 
             }
           }
         });
-        geminiSession = await sessionPromise;
-        
-        // Send initial greeting trigger
-        if (geminiSession) {
-          console.log(`[Gemini] Sending initial greeting trigger in ${preferredLanguage}`);
-          const greetingPrompt = preferredLanguage === 'English'
-            ? `Introduce yourself warmly in English as the DrisaTech AI Support Agent. You may include a very brief welcoming greeting in Hausa, Igbo, Yoruba, or Pidgin (e.g., "Sannu", "Kedu", "Ekaabo", or "How far") to show your multilingual capability. Ask how you can help.`
-            : `Introduce yourself briefly in ${preferredLanguage} as the DrisaTech AI Support Agent and ask how you can help. Do not use any other language for this initial greeting.`;
-          geminiSession.sendRealtimeInput({ parts: [{ text: greetingPrompt }] });
-        }
-      } catch (err) {
-        console.error('[Gemini] Connection failed:', err);
-        ws.send(JSON.stringify({ event: 'error', message: 'Failed to connect to Gemini' }));
-        ws.close();
-      } finally {
-        isConnectingGemini = false;
-      }
-    };
 
-    ws.on('message', (message: any) => {
-      try {
-        const messageStr = message.toString();
-        const data = JSON.parse(messageStr);
-        console.log(`[WS] Received event: ${data.event}`);
-        
-        if (data.event === 'start') {
-          streamSid = data.start?.streamSid || data.streamSid || null;
-          console.log(`[Twilio] Stream started with SID: ${streamSid}`);
-          
-          const from = data.start?.customParameters?.from;
-          preferredLanguage = data.preferredLanguage || 'English';
-          connectToGemini();
-        } else if (data.event === 'message') {
-          const text = data.text;
-          console.log(`[Browser] Received text message: ${text}`);
-          if (text) {
-            transcript.push({ role: 'Customer', text, timestamp: new Date().toISOString() });
-            if (geminiSession) {
-              geminiSession.sendRealtimeInput({ parts: [{ text }] });
-            } else if (!isConnectingGemini) {
-              connectToGemini().then(() => {
-                if (geminiSession) geminiSession.sendRealtimeInput({ parts: [{ text }] });
-              });
-            }
-          }
-        } else if (data.event === 'media' || data.event === 'audio') {
-          const payload = getPayload(data);
-          if (data.streamSid && !streamSid) {
-            streamSid = data.streamSid;
-            console.log(`[Twilio] Captured streamSid from media: ${streamSid}`);
-          }
-          
-          if (geminiSession && payload) {
-            // console.log(`[Gemini] Sending audio chunk, size: ${payload.length}`);
-            geminiSession.sendRealtimeInput({ media: { data: payload, mimeType } });
-          } else if (!geminiSession && !isConnectingGemini && streamSid) {
-            // This case handles if media arrives before 'start' event or if 'start' was missed
-            console.log('[Twilio] Connecting to Gemini on first media packet');
-            connectToGemini().then(() => {
-              if (geminiSession && payload) geminiSession.sendRealtimeInput({ media: { data: payload, mimeType } });
-            });
-          } else if (!geminiSession && !isConnectingGemini && !streamSid && data.event === 'audio') {
-            // For browser, we might not have a 'start' event, so connect on first audio
-            console.log('[Browser] Connecting to Gemini on first audio packet');
-            connectToGemini().then(() => {
-              if (geminiSession) geminiSession.sendRealtimeInput({ media: { data: payload, mimeType } });
-            });
-          }
-        } else if (data.event === 'stop') {
-          console.log(`[Twilio] Stream stopped: ${streamSid}`);
-          if (geminiSession) geminiSession.close();
-        }
-      } catch (e) {
-        console.error('[WS] Message error:', e);
+        geminiSession.sendRealtimeInput({ parts: [{ text: "Introduce yourself briefly as the DrisaTech AI Support Agent and ask how you can help." }] });
+      } else if (data.event === 'media' && geminiSession) {
+        const pcm16 = mulawToPcm16(data.media.payload);
+        if (pcm16) geminiSession.sendRealtimeInput({ media: { data: pcm16, mimeType: 'audio/pcm;rate=16000' } });
       }
     });
 
-    ws.on('error', (err) => {
-      console.error('[WS] WebSocket error:', err);
-    });
-
-    ws.on('close', async () => {
-      console.log(`[WS] Connection closed: ${streamSid}`);
+    ws.on('close', () => {
+      console.log(`[Twilio] Connection closed: ${streamSid}`);
       if (geminiSession) geminiSession.close();
-      
-      // Log session to Firestore
-      if (transcript.length > 0 && firestore) {
-        try {
-          const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY;
-          if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') throw new Error('Gemini API Key is missing or invalid');
-          
-          const ai = new GoogleGenAI({ apiKey });
-          const summaryResponse = await ai.models.generateContent({
-            model: "gemini-3-flash-preview",
-            contents: `Summarize this conversation and determine the outcome (inquiry, support, sale, lead, other): ${JSON.stringify(transcript)}`,
-            config: {
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  summary: { type: Type.STRING },
-                  outcome: { type: Type.STRING, enum: ["inquiry", "support", "sale", "lead", "other"] }
-                },
-                required: ["summary", "outcome"]
-              }
-            }
-          });
-          
-          const { summary, outcome } = JSON.parse(summaryResponse.text);
-          
-          await firestore.collection('conversations').add({
-            sessionId: streamSid || `browser-${clientIp}-${Date.now()}`,
-            startTime,
-            endTime: new Date().toISOString(),
-            language: preferredLanguage,
-            transcript,
-            summary,
-            outcome,
-            clientIp,
-            createdAt: new Date().toISOString()
-          });
-          console.log('[Firestore] Session logged');
-        } catch (err) {
-          console.error('[Firestore] Failed to log session:', err);
-        }
+    });
+  });
+
+  // Browser Stream Handler (Redundant now as frontend uses SDK directly)
+  browserWss.on('connection', (ws: WebSocket) => {
+    console.log(`[Browser] New stream connection`);
+    ws.on('message', (message: any) => {
+      const data = JSON.parse(message.toString());
+      if (data.event === 'start') {
+        ws.send(JSON.stringify({ event: 'started' }));
       }
     });
-  }
+  });
 }
 
 startServer();
