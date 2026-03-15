@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Product, FollowUp } from './types';
 import { useLiveAgent } from './hooks/useLiveAgent';
-import { Mic, MicOff, Phone, PhoneOff, Package, MessageSquare, Settings, Activity, Sun, Moon, BookOpen, LogIn, LogOut, Globe, FileText, Plus, Trash2, Send, Calendar, CheckCircle2 } from 'lucide-react';
+import { Mic, MicOff, Phone, PhoneOff, Package, MessageSquare, Settings, Activity, Sun, Moon, BookOpen, LogIn, LogOut, Globe, FileText, Plus, Trash2, Send, Calendar, CheckCircle2, Headphones } from 'lucide-react';
 import { auth, signInWithGoogle, db as fdb, getRedirectResult } from './firebase';
 import { onAuthStateChanged, User, signOut } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, doc, deleteDoc, updateDoc } from 'firebase/firestore';
@@ -225,13 +225,8 @@ export default function App() {
           <div className={`p-6 border-b ${darkMode ? 'border-white/10' : 'border-white/10'}`}>
             <div className="flex items-center justify-between mb-2">
               <h1 className="text-xl font-semibold text-white flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full overflow-hidden border border-white/20">
-                  <img 
-                    src={`/agent-identity.png?v=${Date.now()}`} 
-                    alt="Drisa" 
-                    className="w-full h-full object-cover"
-                    referrerPolicy="no-referrer"
-                  />
+                <div className="w-8 h-8 rounded-full flex items-center justify-center bg-white/10 border border-white/20">
+                  <Headphones className="w-5 h-5 text-white" />
                 </div>
                 Drisa_AI
               </h1>
@@ -389,13 +384,8 @@ export default function App() {
                     <div className={`absolute inset-4 rounded-full border-4 animate-pulse ${darkMode ? 'border-brand-primary/40' : 'border-brand-secondary/40'}`}></div>
                   </>
                 )}
-                <div className={`relative z-10 w-40 h-40 rounded-full overflow-hidden shadow-lg transition-all duration-300 border-4 ${isConnected ? (darkMode ? 'border-brand-primary' : 'border-brand-secondary') : (darkMode ? 'border-white/10' : 'border-zinc-200')}`}>
-                  <img 
-                    src={`/agent-identity.png?v=${Date.now()}`} 
-                    alt="Customer Support Agent" 
-                    className="w-full h-full object-cover"
-                    referrerPolicy="no-referrer"
-                  />
+                <div className={`relative z-10 w-40 h-40 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 border-4 ${isConnected ? (darkMode ? 'border-brand-primary bg-brand-primary/10' : 'border-brand-secondary bg-brand-secondary/5') : (darkMode ? 'border-white/10 bg-white/5' : 'border-zinc-200 bg-zinc-50')}`}>
+                  <Headphones className={`w-20 h-20 ${isConnected ? (darkMode ? 'text-brand-primary' : 'text-brand-secondary') : (darkMode ? 'text-white/20' : 'text-zinc-300')}`} />
                   {isConnected && (
                     <div className={`absolute inset-0 flex items-center justify-center ${darkMode ? 'bg-brand-primary/10' : 'bg-brand-secondary/10'}`}>
                       <div className={`w-4 h-4 rounded-full animate-pulse shadow-[0_0_15px_rgba(178,24,35,0.8)] ${darkMode ? 'bg-brand-primary' : 'bg-brand-secondary'}`}></div>
