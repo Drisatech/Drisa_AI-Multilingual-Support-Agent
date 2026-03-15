@@ -32,14 +32,17 @@ try {
 
 let firestore: Firestore;
 try {
-  if (firebaseConfig.projectId) {
+  const projectId = firebaseConfig.projectId || process.env.VITE_FIREBASE_PROJECT_ID;
+  const databaseId = firebaseConfig.firestoreDatabaseId || process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID;
+  
+  if (projectId) {
     firestore = new Firestore({
-      projectId: firebaseConfig.projectId,
-      databaseId: firebaseConfig.firestoreDatabaseId
+      projectId: projectId,
+      databaseId: databaseId
     });
-    console.log('[Server] Firestore initialized');
+    console.log(`[Server] Firestore initialized (Project: ${projectId}, DB: ${databaseId || '(default)'})`);
   } else {
-    console.warn('[Server] WARNING: No Firestore project ID found. Firestore disabled.');
+    console.warn('[Server] WARNING: No Firestore project ID found in config or env. Firestore disabled.');
     firestore = null as any;
   }
 } catch (e) {
@@ -83,6 +86,35 @@ Goal: Provide expert advice on DrisaTech products with a rhythmic Nigerian flair
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// --- Agent Identity Image Route ---
+// We define this at the top level to ensure it works in both dev and prod
+app.get('/agent-identity.png', (req, res) => {
+  const possiblePaths = [
+    path.resolve(process.cwd(), 'public/agent-identity.png'),
+    path.resolve(process.cwd(), 'dist/agent-identity.png'),
+    path.resolve(process.cwd(), 'agent-identity.png'),
+    path.join(__dirname, 'public/agent-identity.png'),
+    path.join(__dirname, 'dist/agent-identity.png'),
+    '/app/public/agent-identity.png',
+    '/app/dist/agent-identity.png'
+  ];
+  
+  for (const imgPath of possiblePaths) {
+    try {
+      if (fs.existsSync(imgPath)) {
+        const data = fs.readFileSync(imgPath);
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        return res.send(data);
+      }
+    } catch (e) {
+      // Continue to next path
+    }
+  }
+  
+  res.status(404).send('Agent identity image not found');
+});
 
 // --- Google Calendar OAuth Setup ---
 const getRedirectUri = (req?: any) => {
@@ -628,36 +660,6 @@ async function startServer() {
     console.log(`[Server] distPath: ${distPath}`);
     console.log(`[Server] publicPath: ${publicPath}`);
     
-    // Explicit route for the agent identity image - MOVED ABOVE express.static
-    // to ensure it's handled with correct headers and priority
-    app.get('/agent-identity.png', (req, res) => {
-      const possiblePaths = [
-        path.join(distPath, 'agent-identity.png'),
-        path.join(publicPath, 'agent-identity.png'),
-        path.join(process.cwd(), 'agent-identity.png'),
-        path.resolve('dist/agent-identity.png'),
-        path.resolve('public/agent-identity.png')
-      ];
-      
-      console.log(`[Server] Request for /agent-identity.png.`);
-      
-      for (const imgPath of possiblePaths) {
-        try {
-          if (fs.existsSync(imgPath)) {
-            console.log(`[Server] Image found at: ${imgPath}`);
-            res.setHeader('Content-Type', 'image/png');
-            res.setHeader('Cache-Control', 'public, max-age=86400');
-            return res.sendFile(imgPath);
-          }
-        } catch (e) {
-          // Ignore errors during check
-        }
-      }
-      
-      console.error(`[Server] ERROR: Image NOT FOUND in any of the possible paths.`);
-      res.status(404).send('Agent identity image not found');
-    });
-
     if (fs.existsSync(distPath)) {
       console.log(`[Server] dist folder exists.`);
     } else {
