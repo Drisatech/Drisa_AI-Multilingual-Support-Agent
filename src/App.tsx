@@ -744,6 +744,10 @@ export default function App() {
         {activeTab === 'agent' && (
           <div className="max-w-3xl mx-auto">
             <div className="mb-8">
+              <div className="flex items-center gap-3 mb-4">
+                <DrisaLogo className={`w-10 h-10 ${darkMode ? 'text-brand-primary' : 'text-brand-secondary'}`} />
+                <h1 className={`text-2xl font-bold tracking-tight ${darkMode ? 'text-white' : 'text-zinc-900'}`}>Drisa_AI</h1>
+              </div>
               <h2 className={`text-3xl font-semibold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>Live Voice Agent</h2>
             </div>
 
