@@ -225,7 +225,14 @@ export default function App() {
           <div className={`p-6 border-b ${darkMode ? 'border-white/10' : 'border-white/10'}`}>
             <div className="flex items-center justify-between mb-2">
               <h1 className="text-xl font-semibold text-white flex items-center gap-2">
-                <Activity className="w-6 h-6 text-brand-light" />
+                <div className="w-8 h-8 rounded-full overflow-hidden border border-white/20">
+                  <img 
+                    src={`/agent-identity.png?v=${Date.now()}`} 
+                    alt="Drisa" 
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
                 Drisa_AI
               </h1>
               <button 

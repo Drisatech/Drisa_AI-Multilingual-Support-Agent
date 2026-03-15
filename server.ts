@@ -91,26 +91,41 @@ app.use(express.urlencoded({ extended: true }));
 // We define this at the top level to ensure it works in both dev and prod
 app.get('/agent-identity.png', (req, res) => {
   const possiblePaths = [
-    path.resolve(process.cwd(), 'public/agent-identity.png'),
     path.resolve(process.cwd(), 'dist/agent-identity.png'),
+    path.resolve(process.cwd(), 'public/agent-identity.png'),
     path.resolve(process.cwd(), 'agent-identity.png'),
-    path.join(__dirname, 'public/agent-identity.png'),
     path.join(__dirname, 'dist/agent-identity.png'),
+    path.join(__dirname, 'public/agent-identity.png'),
+    path.join(__dirname, 'agent-identity.png'),
+    '/app/dist/agent-identity.png',
     '/app/public/agent-identity.png',
-    '/app/dist/agent-identity.png'
+    '/app/agent-identity.png',
+    path.resolve('dist/agent-identity.png'),
+    path.resolve('public/agent-identity.png')
   ];
+  
+  console.log(`[Server] Request for /agent-identity.png from ${req.ip}`);
   
   for (const imgPath of possiblePaths) {
     try {
       if (fs.existsSync(imgPath)) {
-        const data = fs.readFileSync(imgPath);
-        res.setHeader('Content-Type', 'image/png');
+        console.log(`[Server] Serving agent-identity.png from: ${imgPath}`);
         res.setHeader('Cache-Control', 'public, max-age=86400');
-        return res.send(data);
+        return res.sendFile(imgPath);
       }
     } catch (e) {
-      // Continue to next path
+      console.error(`[Server] Error checking path ${imgPath}:`, e);
     }
+  }
+  
+  console.error(`[Server] Agent identity image NOT FOUND in any of the ${possiblePaths.length} paths checked.`);
+  
+  // Fallback: if we can't find the file, but we know it should be in public/
+  // try to serve it from there if it exists
+  const publicFallback = path.resolve(process.cwd(), 'public/agent-identity.png');
+  if (fs.existsSync(publicFallback)) {
+    console.log(`[Server] Using public fallback: ${publicFallback}`);
+    return res.sendFile(publicFallback);
   }
   
   res.status(404).send('Agent identity image not found');
