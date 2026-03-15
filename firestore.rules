@@ -5,49 +5,61 @@ service cloud.firestore {
     // Assumed Data Model
     // ===============================================================
     //
-    // Collection: sessions
-    // Fields: startTime, endTime, callerId, preferredLanguage, transcript, summary, outcome
+    // Collection: leads
+    // Fields: contactType, phone, email, notes, createdAt, status
+    //
+    // Collection: conversations
+    // Fields: sessionId, startTime, endTime, language, transcript, summary, outcome, clientIp, createdAt
     //
     // Collection: products
-    // Fields: name, description, price, category, imageUrl, updatedAt
+    // Fields: name, description, price, category, updatedAt
     //
     // Collection: knowledge_sources
     // Fields: type, content, status, createdAt
     //
     // ===============================================================
 
-    // Helper Functions
+    // Helper functions
     function isAuthenticated() {
       return request.auth != null;
     }
-
+    
     function isAdmin() {
-      return isAuthenticated() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          (request.auth.token.email == "drisatech@gmail.com" && request.auth.token.email_verified == true));
+      return isAuthenticated() && 
+        (request.auth.token.email == "drisatech@gmail.com");
     }
 
-    // Sessions: AI Agent (server) can create/update. Admin can read.
-    match /sessions/{sessionId} {
-      allow read: if isAdmin();
-      allow create, update: if true; // In a production app, we'd restrict this to a service account or specific backend trigger
+    // Leads: Public can create (for AI capture), Admin can read/write
+    match /leads/{leadId} {
+      allow create: if true; 
+      allow read, update, delete: if isAdmin();
     }
 
-    // Products: Publicly readable by the agent. Writable only by admin.
+    // Conversations: Public can create (for AI logging), Admin can read/write
+    match /conversations/{convId} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Products: Publicly readable, Admin can write
     match /products/{productId} {
       allow read: if true;
       allow write: if isAdmin();
     }
 
-    // Knowledge Sources: Only admin can manage.
+    // Knowledge Sources: Admin only
     match /knowledge_sources/{sourceId} {
       allow read, write: if isAdmin();
     }
 
-    // User profiles for RBAC
-    match /users/{userId} {
-      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
-      allow write: if isAdmin();
+    // Settings: Admin only
+    match /settings/{settingId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

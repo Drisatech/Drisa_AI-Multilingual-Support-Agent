@@ -1,69 +1,87 @@
 {
   "entities": {
-    "Session": {
-      "title": "Session",
-      "description": "A record of a voice conversation session with a client.",
+    "Lead": {
+      "title": "Lead",
+      "description": "A potential customer lead captured during a conversation.",
       "type": "object",
       "properties": {
-        "startTime": { "type": "string", "format": "date-time" },
-        "endTime": { "type": "string", "format": "date-time" },
-        "callerId": { "type": "string", "description": "Identifier for the caller (e.g., phone number or browser session ID)" },
-        "preferredLanguage": { "type": "string" },
+        "name": { "type": "string", "description": "Name of the lead" },
+        "email": { "type": "string", "format": "email", "description": "Email address" },
+        "phone": { "type": "string", "description": "WhatsApp or Phone number" },
+        "interest": { "type": "string", "description": "Product or service they are interested in" },
+        "notes": { "type": "string", "description": "Additional notes from the conversation" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the lead was captured" },
+        "status": { "type": "string", "enum": ["new", "contacted", "closed"], "description": "Current status of the lead" }
+      },
+      "required": ["phone", "createdAt"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "A log of a conversation session with the AI agent.",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "description": "Unique session identifier" },
+        "startTime": { "type": "string", "format": "date-time", "description": "When the session started" },
+        "endTime": { "type": "string", "format": "date-time", "description": "When the session ended" },
         "transcript": {
           "type": "array",
           "items": {
             "type": "object",
             "properties": {
-              "role": { "type": "string", "enum": ["AI", "Customer"] },
+              "role": { "type": "string", "enum": ["user", "model"] },
               "text": { "type": "string" },
               "timestamp": { "type": "string", "format": "date-time" }
             }
           }
         },
-        "summary": { "type": "string" },
-        "outcome": { "type": "string", "enum": ["inquiry", "support", "sale", "lead", "other"] }
+        "language": { "type": "string", "description": "Language used in the session" }
       },
-      "required": ["startTime", "callerId"]
+      "required": ["sessionId", "startTime"]
     },
     "Product": {
       "title": "Product",
-      "description": "An item in the product catalog.",
+      "description": "A product in the DrisaTech catalog.",
       "type": "object",
       "properties": {
+        "id": { "type": "string" },
         "name": { "type": "string" },
-        "description": { "type": "string" },
-        "price": { "type": "number" },
         "category": { "type": "string" },
-        "imageUrl": { "type": "string" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "price": { "type": "string" },
+        "description": { "type": "string" },
+        "features": { "type": "array", "items": { "type": "string" } }
       },
-      "required": ["name", "price"]
+      "required": ["id", "name", "price"]
     },
-    "KnowledgeSource": {
-      "title": "Knowledge Source",
-      "description": "A link or article used to populate the product catalog.",
+    "CalendarConfig": {
+      "title": "CalendarConfig",
+      "description": "OAuth tokens and settings for Google Calendar integration.",
       "type": "object",
       "properties": {
-        "type": { "type": "string", "enum": ["url", "article"] },
-        "content": { "type": "string", "description": "The URL or the text of the article" },
-        "status": { "type": "string", "enum": ["pending", "processed", "failed"] },
-        "createdAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["type", "content", "createdAt"]
+        "access_token": { "type": "string" },
+        "refresh_token": { "type": "string" },
+        "scope": { "type": "string" },
+        "token_type": { "type": "string" },
+        "expiry_date": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
     }
   },
   "firestore": {
-    "/sessions/{sessionId}": {
-      "schema": "Session",
-      "description": "Collection of all voice sessions."
+    "/leads/{leadId}": {
+      "schema": "Lead",
+      "description": "Collection of captured customer leads"
+    },
+    "/conversations/{convId}": {
+      "schema": "Conversation",
+      "description": "Logs of AI agent conversations"
     },
     "/products/{productId}": {
       "schema": "Product",
-      "description": "The product catalog."
+      "description": "Product catalog data"
     },
-    "/knowledge_sources/{sourceId}": {
-      "schema": "KnowledgeSource",
-      "description": "Sources used to update the catalog."
+    "/settings/{settingId}": {
+      "schema": "CalendarConfig",
+      "description": "Global application settings (e.g., google_calendar)"
     }
   }
 }

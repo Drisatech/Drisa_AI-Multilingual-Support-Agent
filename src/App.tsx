@@ -1,28 +1,34 @@
 import { useState, useEffect, useRef } from 'react';
 import { Product, FollowUp } from './types';
 import { useLiveAgent } from './hooks/useLiveAgent';
-import { Mic, MicOff, Phone, PhoneOff, Package, MessageSquare, Settings, Activity, Sun, Moon, BookOpen, LogIn, LogOut, Globe, FileText, Plus, Trash2, Send } from 'lucide-react';
-import { auth, signInWithGoogle, db as fdb } from './firebase';
+import { Mic, MicOff, Phone, PhoneOff, Package, MessageSquare, Settings, Activity, Sun, Moon, BookOpen, LogIn, LogOut, Globe, FileText, Plus, Trash2, Send, Calendar, CheckCircle2 } from 'lucide-react';
+import { auth, signInWithGoogle, db as fdb, getRedirectResult } from './firebase';
 import { onAuthStateChanged, User, signOut } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'agent' | 'kb' | 'sessions'>('agent');
+  const [activeTab, setActiveTab] = useState<'agent' | 'kb' | 'sessions' | 'leads' | 'settings'>('agent');
+  const [isCalendarConnected, setIsCalendarConnected] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [isWidgetMode, setIsWidgetMode] = useState(false);
   const [preferredLanguage, setPreferredLanguage] = useState('English');
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [messageInput, setMessageInput] = useState('');
+  const [debugAuth, setDebugAuth] = useState(false);
   
   // Sessions State
   const [sessions, setSessions] = useState<any[]>([]);
+  const [leads, setLeads] = useState<any[]>([]);
   
   // Knowledge Base State
   const [kbSources, setKbSources] = useState<any[]>([]);
   const [newSourceUrl, setNewSourceUrl] = useState('');
   const [newSourceArticle, setNewSourceArticle] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [appError, setAppError] = useState<string | null>(null);
 
   const { isConnected, isConnecting, error, connect, disconnect, sendMessage } = useLiveAgent();
   const [callDuration, setCallDuration] = useState(0);
@@ -63,28 +69,117 @@ export default function App() {
     }
 
     const unsubscribe = auth ? onAuthStateChanged(auth, (u) => {
+      console.log("Auth state changed:", u?.email);
       setUser(u);
-      setIsAdmin(u?.email === 'drisatech@gmail.com');
-    }) : () => {};
+      setIsAdmin(u?.email?.toLowerCase() === 'drisatech@gmail.com');
+      setIsAuthLoading(false);
+    }) : () => { setIsAuthLoading(false); };
+
+    // Handle redirect result
+    if (auth) {
+      getRedirectResult(auth).then((result) => {
+        if (result?.user) {
+          console.log("Redirect result user:", result.user.email);
+          setUser(result.user);
+          setIsAdmin(result.user.email?.toLowerCase() === 'drisatech@gmail.com');
+        }
+        setIsAuthLoading(false);
+      }).catch((err) => {
+        console.error("Redirect auth error:", err.code, err.message);
+        setIsAuthLoading(false);
+        if (err.code === 'auth/unauthorized-domain') {
+          setAppError(`Domain Unauthorized: Please add ${window.location.hostname} to your Firebase Authorized Domains.`);
+        }
+      });
+    }
+
     return () => unsubscribe();
   }, []);
+
+  const handleLogin = async () => {
+    if (isLoggingIn) return;
+    setIsLoggingIn(true);
+    try {
+      const user = await signInWithGoogle();
+      if (user) {
+        console.log("Login success for:", user.email);
+      }
+    } catch (err: any) {
+      console.error("Login catch block:", err.code, err.message);
+      if (err.code === 'auth/unauthorized-domain') {
+        alert(`Domain Unauthorized: Please add ${window.location.hostname} to your Firebase Console (Authentication -> Settings -> Authorized domains).`);
+      } else if (err.code !== 'auth/cancelled-popup-request' && err.code !== 'auth/popup-closed-by-user') {
+        alert(`Login failed: ${err.message} (${err.code})`);
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
 
   useEffect(() => {
     if (isAdmin && activeTab === 'kb' && fdb) {
       const q = query(collection(fdb, 'knowledge_sources'), orderBy('createdAt', 'desc'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
         setKbSources(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, (err) => {
+        console.error("Firestore KB Error:", err);
+        if (err.message.includes('insufficient permissions')) {
+          setAppError("Firestore Permission Denied: Your account may not have admin privileges in the security rules.");
+        }
       });
       return () => unsubscribe();
     } else if (isAdmin && activeTab === 'sessions' && fdb) {
-      const q = query(collection(fdb, 'sessions'), orderBy('createdAt', 'desc'));
+      const q = query(collection(fdb, 'conversations'), orderBy('createdAt', 'desc'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
         setSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, (err) => {
+        console.error("Firestore Sessions Error:", err);
+      });
+      return () => unsubscribe();
+    } else if (isAdmin && activeTab === 'leads' && fdb) {
+      const q = query(collection(fdb, 'leads'), orderBy('createdAt', 'desc'));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        setLeads(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, (err) => {
+        console.error("Firestore Leads Error:", err);
       });
       return () => unsubscribe();
     }
   }, [isAdmin, activeTab]);
 
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'GOOGLE_AUTH_SUCCESS') {
+        setIsCalendarConnected(true);
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
+  useEffect(() => {
+    if (isAdmin) {
+      fetch('/api/auth/google/status')
+        .then(res => res.json())
+        .then(data => setIsCalendarConnected(data.connected))
+        .catch(err => console.error('Failed to check calendar status:', err));
+    }
+  }, [isAdmin]);
+
+  const handleConnectGoogleCalendar = async () => {
+    try {
+      const res = await fetch('/api/auth/google/url');
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to get Google Auth URL');
+        return;
+      }
+      window.open(data.url, 'google_auth', 'width=600,height=700');
+    } catch (err) {
+      console.error('Failed to get Google Auth URL:', err);
+      alert('An unexpected error occurred while connecting to Google Calendar.');
+    }
+  };
   const handleAddSource = async (type: 'url' | 'article') => {
     if (!isAdmin || !fdb) return;
     setIsProcessing(true);
@@ -92,7 +187,7 @@ export default function App() {
       const content = type === 'url' ? newSourceUrl : newSourceArticle;
       if (!content) return;
 
-      await addDoc(collection(fdb, 'knowledge_sources'), {
+      const docRef = await addDoc(collection(fdb, 'knowledge_sources'), {
         type,
         content,
         status: 'pending',
@@ -104,7 +199,7 @@ export default function App() {
       const response = await fetch('/api/kb/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, content })
+        body: JSON.stringify({ type, content, id: docRef.id })
       });
       
       if (!response.ok) {
@@ -168,26 +263,72 @@ export default function App() {
                   <Activity className="w-5 h-5" />
                   Call Sessions
                 </button>
+                <button 
+                  onClick={() => setActiveTab('leads')}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'leads' ? (darkMode ? 'bg-brand-primary text-white' : 'bg-brand-secondary text-white') : 'hover:bg-white/10'}`}
+                >
+                  <Package className="w-5 h-5" />
+                  Leads & Follow-ups
+                </button>
+                <button 
+                  onClick={() => setActiveTab('settings')}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'settings' ? (darkMode ? 'bg-brand-primary text-white' : 'bg-brand-secondary text-white') : 'hover:bg-white/10'}`}
+                >
+                  <Settings className="w-5 h-5" />
+                  Settings
+                </button>
               </>
             )}
           </nav>
 
           <div className="p-4 border-t border-white/10">
-            {user ? (
-              <button 
-                onClick={() => signOut(auth)}
-                className="w-full flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-white/10 transition-colors text-white/70 text-sm"
-              >
-                <LogOut className="w-4 h-4" />
-                Sign Out
-              </button>
+            {isAuthLoading ? (
+              <div className="flex items-center justify-center p-4">
+                <Activity className="w-5 h-5 animate-spin text-white/20" />
+              </div>
+            ) : user ? (
+              <div className="space-y-2">
+                <div className="px-4 py-2 text-xs text-white/50 truncate">
+                  Logged in as: <span className="text-white/80">{user.email}</span>
+                  {!isAdmin && (
+                    <div className="text-amber-400 mt-2 p-2 bg-amber-400/10 border border-amber-400/20 rounded-lg">
+                      <p className="font-bold">Access Restricted</p>
+                      <p className="opacity-80">Only drisatech@gmail.com has admin access.</p>
+                    </div>
+                  )}
+                </div>
+                <button 
+                  onClick={() => setDebugAuth(!debugAuth)}
+                  className="w-full flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-white/10 transition-colors text-white/40 text-[10px] uppercase tracking-widest"
+                >
+                  <Settings className="w-3 h-3" />
+                  {debugAuth ? 'Hide Debug' : 'Show Debug'}
+                </button>
+                {debugAuth && (
+                  <div className="p-2 bg-black/40 rounded-lg text-[10px] font-mono text-white/60 break-all overflow-auto max-h-32">
+                    <p>UID: {user.uid}</p>
+                    <p>Email: {user.email}</p>
+                    <p>Verified: {String(user.emailVerified)}</p>
+                    <p>Admin: {String(isAdmin)}</p>
+                    <p>Domain: {window.location.hostname}</p>
+                  </div>
+                )}
+                <button 
+                  onClick={() => signOut(auth)}
+                  className="w-full flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-white/10 transition-colors text-white/70 text-sm"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Sign Out
+                </button>
+              </div>
             ) : (
               <button 
-                onClick={signInWithGoogle}
-                className="w-full flex items-center gap-3 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors text-white text-sm"
+                onClick={handleLogin}
+                disabled={isLoggingIn}
+                className="w-full flex items-center gap-3 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors text-white text-sm disabled:opacity-50"
               >
                 <LogIn className="w-4 h-4" />
-                Admin Login
+                {isLoggingIn ? 'Logging in...' : 'Admin Login'}
               </button>
             )}
           </div>
@@ -196,6 +337,17 @@ export default function App() {
 
       {/* Main Content */}
       <main className={`flex-1 overflow-y-auto ${isWidgetMode ? 'p-4' : 'p-6 md:p-10'}`}>
+        {appError && (
+          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center justify-between gap-3 text-red-500 text-sm">
+            <div className="flex items-center gap-3">
+              <Activity className="w-5 h-5" />
+              <p>{appError}</p>
+            </div>
+            <button onClick={() => setAppError(null)} className="p-1 hover:bg-red-500/10 rounded">
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+        )}
         {(!fdb || !auth) && (
           <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center gap-3 text-amber-500 text-sm">
             <Activity className="w-5 h-5" />
@@ -431,6 +583,27 @@ export default function App() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
+                    {source.status === 'pending' && (
+                      <button 
+                        onClick={async () => {
+                          setIsProcessing(true);
+                          try {
+                            await fetch('/api/kb/process', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ type: source.type, content: source.content, id: source.id })
+                            });
+                          } catch (e) {
+                            console.error(e);
+                          } finally {
+                            setIsProcessing(false);
+                          }
+                        }}
+                        className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-brand-primary text-brand-primary hover:bg-brand-primary hover:text-white transition-colors"
+                      >
+                        Retry Process
+                      </button>
+                    )}
                     <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${
                       source.status === 'processed' ? 'border-emerald-500/50 text-emerald-500 bg-emerald-500/10' : 
                       source.status === 'failed' ? 'border-red-500/50 text-red-500 bg-red-500/10' : 
@@ -444,6 +617,78 @@ export default function App() {
             </div>
           </div>
         )}
+        {activeTab === 'leads' && isAdmin && (
+          <div className="max-w-5xl mx-auto">
+            <div className="mb-8 flex justify-between items-end">
+              <div>
+                <h2 className={`text-3xl font-semibold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>Leads & Follow-ups</h2>
+                <p className={`${darkMode ? 'text-white/60' : 'text-zinc-500'} mt-2`}>Potential customers captured by the AI agent.</p>
+              </div>
+              <div className={`text-xs font-bold uppercase tracking-widest ${darkMode ? 'text-white/40' : 'text-zinc-400'}`}>
+                Total Leads: {leads.length}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4">
+              {leads.map(lead => (
+                <div key={lead.id} className={`p-6 rounded-2xl border flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors duration-300 ${darkMode ? 'bg-brand-secondary border-white/10' : 'bg-white border-zinc-200'}`}>
+                  <div className="flex items-center gap-4">
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center ${darkMode ? 'bg-white/5' : 'bg-zinc-50'}`}>
+                      {lead.contactType === 'whatsapp' ? <MessageSquare className="w-6 h-6 text-emerald-500" /> : <Send className="w-6 h-6 text-blue-500" />}
+                    </div>
+                    <div>
+                      <div className={`font-bold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>{lead.phone || lead.email}</div>
+                      <div className="text-xs text-zinc-400 uppercase tracking-wider mt-0.5">
+                        {lead.contactType} • {new Date(lead.createdAt).toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="flex-1 max-w-md">
+                    <p className={`text-sm italic ${darkMode ? 'text-white/60' : 'text-zinc-500'}`}>"{lead.notes}"</p>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <select 
+                      value={lead.status || 'new'}
+                      onChange={async (e) => {
+                        if (fdb) {
+                          await updateDoc(doc(fdb, 'leads', lead.id), { status: e.target.value });
+                        }
+                      }}
+                      className={`text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg border outline-none transition-colors ${
+                        lead.status === 'closed' ? 'border-emerald-500/50 text-emerald-500 bg-emerald-500/10' : 
+                        lead.status === 'contacted' ? 'border-blue-500/50 text-blue-500 bg-blue-500/10' : 
+                        'border-amber-500/50 text-amber-500 bg-amber-500/10'
+                      }`}
+                    >
+                      <option value="new">New</option>
+                      <option value="contacted">Contacted</option>
+                      <option value="closed">Closed</option>
+                    </select>
+                    <button 
+                      onClick={async () => {
+                        if (fdb && confirm('Are you sure you want to delete this lead?')) {
+                          await deleteDoc(doc(fdb, 'leads', lead.id));
+                        }
+                      }}
+                      className={`p-2 rounded-lg hover:bg-red-500/10 text-zinc-400 hover:text-red-500 transition-colors`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {leads.length === 0 && (
+                <div className="text-center py-12 text-zinc-400 bg-white/5 rounded-3xl border border-dashed border-zinc-200">
+                  <Package className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                  <p>No leads captured yet. The AI will save them here when customers provide contact info.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {activeTab === 'sessions' && isAdmin && (
           <div className="max-w-5xl mx-auto">
             <div className="mb-8">
@@ -457,7 +702,12 @@ export default function App() {
                   <div className="flex justify-between items-start mb-4">
                     <div>
                       <div className="flex items-center gap-3 mb-1">
-                        <span className={`text-sm font-bold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>{session.callerId}</span>
+                        <span className={`text-sm font-bold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>{session.sessionId}</span>
+                        {session.clientIp && (
+                          <span className="text-[10px] font-mono text-zinc-400 bg-zinc-100 dark:bg-white/5 px-1.5 py-0.5 rounded">
+                            IP: {session.clientIp}
+                          </span>
+                        )}
                         <span className={`text-xs px-2 py-0.5 rounded-full ${
                           session.outcome === 'sale' ? 'bg-emerald-500/10 text-emerald-500' :
                           session.outcome === 'lead' ? 'bg-blue-500/10 text-blue-500' :
@@ -467,7 +717,7 @@ export default function App() {
                         </span>
                       </div>
                       <div className="text-xs text-zinc-400">
-                        {new Date(session.startTime).toLocaleString()} • {session.preferredLanguage}
+                        {new Date(session.startTime).toLocaleString()} • {session.language}
                       </div>
                     </div>
                   </div>
@@ -496,6 +746,50 @@ export default function App() {
               {sessions.length === 0 && (
                 <div className="text-center py-12 text-zinc-400">No sessions logged yet.</div>
               )}
+            </div>
+          </div>
+        )}
+        {activeTab === 'settings' && isAdmin && (
+          <div className="max-w-5xl mx-auto">
+            <div className="mb-8">
+              <h2 className={`text-3xl font-semibold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>Settings</h2>
+              <p className={`${darkMode ? 'text-white/60' : 'text-zinc-500'} mt-2`}>Configure integrations and agent behavior.</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className={`p-6 rounded-2xl border transition-colors duration-300 ${darkMode ? 'bg-brand-secondary border-white/10' : 'bg-white border-zinc-200'}`}>
+                <div className="flex items-center gap-3 mb-4">
+                  <Calendar className="w-5 h-5 text-brand-primary" />
+                  <h3 className={`font-semibold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>Google Calendar</h3>
+                </div>
+                <p className={`text-sm mb-6 ${darkMode ? 'text-white/60' : 'text-zinc-500'}`}>
+                  Connect your Google Calendar to allow the AI agent to book appointments and site visits directly.
+                </p>
+                
+                {isCalendarConnected ? (
+                  <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                    <div>
+                      <div className="text-sm font-bold text-emerald-500 uppercase tracking-wider">Connected</div>
+                      <div className={`text-xs ${darkMode ? 'text-emerald-500/70' : 'text-emerald-600'}`}>The AI can now book appointments.</div>
+                    </div>
+                    <button 
+                      onClick={handleConnectGoogleCalendar}
+                      className="ml-auto text-[10px] font-bold uppercase tracking-wider text-emerald-500 underline hover:no-underline"
+                    >
+                      Reconnect
+                    </button>
+                  </div>
+                ) : (
+                  <button 
+                    onClick={handleConnectGoogleCalendar}
+                    className="w-full py-3 bg-brand-primary text-white rounded-xl font-medium hover:bg-brand-primary/90 transition-all flex items-center justify-center gap-2"
+                  >
+                    <Calendar className="w-4 h-4" />
+                    Connect Google Calendar
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}

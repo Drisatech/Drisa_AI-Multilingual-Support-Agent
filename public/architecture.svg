@@ -1,60 +1,137 @@
-
-<svg width="800" height="500" viewBox="0 0 800 500" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- Background -->
-  <rect width="800" height="500" rx="20" fill="#F8FAFC"/>
+<svg width="1200" height="800" viewBox="0 0 1200 800" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="800" rx="24" fill="#F1F5F9"/>
   
-  <!-- Title -->
-  <text x="400" y="40" font-family="Inter, sans-serif" font-size="24" font-weight="600" fill="#1E293B" text-anchor="middle">Drisa_AI Agent Architecture</text>
+  <!-- Header Section -->
+  <rect x="0" y="0" width="1200" height="80" fill="white"/>
+  <text x="600" y="48" font-family="Inter, sans-serif" font-size="28" font-weight="700" fill="#0F172A" text-anchor="middle">Drisa_AI Agent System Architecture</text>
+  <text x="600" y="68" font-family="Inter, sans-serif" font-size="14" fill="#64748B" text-anchor="middle">Full-Stack Multimodal AI Sales &amp; Support Platform</text>
+
+  <!-- --- CLIENT LAYER --- -->
+  <text x="150" y="130" font-family="Inter, sans-serif" font-size="16" font-weight="700" fill="#475569">CLIENT LAYER</text>
   
-  <!-- User Section -->
-  <rect x="50" y="180" width="120" height="140" rx="12" fill="white" stroke="#E2E8F0" stroke-width="2"/>
-  <circle cx="110" cy="230" r="20" fill="#3B82F6" fill-opacity="0.1" stroke="#3B82F6" stroke-width="2"/>
-  <path d="M110 235V255M100 245H120" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"/>
-  <text x="110" y="290" font-family="Inter, sans-serif" font-size="14" font-weight="500" fill="#64748B" text-anchor="middle">User Interface</text>
-  <text x="110" y="305" font-family="Inter, sans-serif" font-size="10" fill="#94A3B8" text-anchor="middle">(Web / Voice)</text>
+  <!-- User App -->
+  <rect x="50" y="150" width="200" height="120" rx="16" fill="white" stroke="#E2E8F0" stroke-width="2"/>
+  <rect x="50" y="150" width="200" height="40" rx="16 16 0 0" fill="#3B82F6"/>
+  <text x="150" y="176" font-family="Inter, sans-serif" font-size="14" font-weight="600" fill="white" text-anchor="middle">User Web App</text>
+  <text x="150" y="215" font-family="Inter, sans-serif" font-size="12" fill="#1E293B" text-anchor="middle">Real-time Voice &amp; Chat</text>
+  <text x="150" y="235" font-family="Inter, sans-serif" font-size="11" fill="#64748B" text-anchor="middle">React + Vite + Tailwind</text>
 
-  <!-- Connection Line -->
-  <path d="M170 250H240" stroke="#94A3B8" stroke-width="2" stroke-dasharray="4 4"/>
-  <path d="M235 245L245 250L235 255" fill="#94A3B8"/>
-  <text x="205" y="240" font-family="Inter, sans-serif" font-size="10" fill="#64748B" text-anchor="middle">WebSocket / HTTPS</text>
+  <!-- Admin Dashboard -->
+  <rect x="50" y="300" width="200" height="120" rx="16" fill="white" stroke="#E2E8F0" stroke-width="2"/>
+  <rect x="50" y="300" width="200" height="40" rx="16 16 0 0" fill="#6366F1"/>
+  <text x="150" y="326" font-family="Inter, sans-serif" font-size="14" font-weight="600" fill="white" text-anchor="middle">Admin Dashboard</text>
+  <text x="150" y="365" font-family="Inter, sans-serif" font-size="12" fill="#1E293B" text-anchor="middle">KB &amp; Catalog Management</text>
+  <text x="150" y="385" font-family="Inter, sans-serif" font-size="11" fill="#64748B" text-anchor="middle">OAuth Configuration</text>
 
-  <!-- Backend Section -->
-  <rect x="250" y="150" width="200" height="200" rx="16" fill="#1E293B"/>
-  <text x="350" y="190" font-family="Inter, sans-serif" font-size="16" font-weight="600" fill="white" text-anchor="middle">Drisa_AI Backend</text>
-  <text x="350" y="210" font-family="Inter, sans-serif" font-size="12" fill="#94A3B8" text-anchor="middle">(Node.js / Express)</text>
+  <!-- --- COMMUNICATION LAYER --- -->
+  <!-- Audio Stream -->
+  <path d="M250 210H380" stroke="#3B82F6" stroke-width="2" stroke-dasharray="6 3"/>
+  <path d="M375 205L385 210L375 215" fill="#3B82F6"/>
+  <text x="315" y="200" font-family="Inter, sans-serif" font-size="10" font-weight="600" fill="#3B82F6" text-anchor="middle">WebSocket (Audio)</text>
+
+  <!-- REST API -->
+  <path d="M250 360H380" stroke="#6366F1" stroke-width="2"/>
+  <path d="M375 355L385 360L375 365" fill="#6366F1"/>
+  <text x="315" y="350" font-family="Inter, sans-serif" font-size="10" font-weight="600" fill="#6366F1" text-anchor="middle">HTTPS / JSON</text>
+
+  <!-- --- BACKEND CORE --- -->
+  <rect x="400" y="120" width="400" height="400" rx="24" fill="#0F172A"/>
+  <text x="600" y="160" font-family="Inter, sans-serif" font-size="20" font-weight="700" fill="white" text-anchor="middle">Drisa_AI Backend Engine</text>
+  <text x="600" y="180" font-family="Inter, sans-serif" font-size="12" fill="#94A3B8" text-anchor="middle">Node.js • Express • Google Cloud Run</text>
+
+  <!-- Backend Modules -->
+  <rect x="430" y="210" width="340" height="50" rx="8" fill="#334155"/>
+  <text x="600" y="240" font-family="Inter, sans-serif" font-size="14" font-weight="600" fill="#F1F5F9" text-anchor="middle">Multimodal Session Manager</text>
   
-  <!-- Inner Backend Components -->
-  <rect x="270" y="230" width="160" height="30" rx="6" fill="#334155"/>
-  <text x="350" y="250" font-family="Inter, sans-serif" font-size="11" fill="#E2E8F0" text-anchor="middle">Session Management</text>
-  <rect x="270" y="270" width="160" height="30" rx="6" fill="#334155"/>
-  <text x="350" y="290" font-family="Inter, sans-serif" font-size="11" fill="#E2E8F0" text-anchor="middle">Tool Orchestration</text>
-  <rect x="270" y="310" width="160" height="30" rx="6" fill="#334155"/>
-  <text x="350" y="330" font-family="Inter, sans-serif" font-size="11" fill="#E2E8F0" text-anchor="middle">Real-time Proxy</text>
+  <rect x="430" y="270" width="340" height="50" rx="8" fill="#334155"/>
+  <text x="600" y="300" font-family="Inter, sans-serif" font-size="14" font-weight="600" fill="#F1F5F9" text-anchor="middle">Audio Transcoding (mu-law ↔ PCM)</text>
+  
+  <rect x="430" y="330" width="340" height="50" rx="8" fill="#334155"/>
+  <text x="600" y="360" font-family="Inter, sans-serif" font-size="14" font-weight="600" fill="#F1F5F9" text-anchor="middle">Tool Orchestration &amp; Function Calls</text>
+  
+  <rect x="430" y="390" width="340" height="50" rx="8" fill="#334155"/>
+  <text x="600" y="420" font-family="Inter, sans-serif" font-size="14" font-weight="600" fill="#F1F5F9" text-anchor="middle">Knowledge Base RAG Engine</text>
 
-  <!-- Gemini AI Section -->
-  <path d="M450 200H520" stroke="#10B981" stroke-width="2"/>
-  <path d="M515 195L525 200L515 205" fill="#10B981"/>
-  <rect x="530" y="140" width="180" height="100" rx="12" fill="white" stroke="#10B981" stroke-width="2"/>
-  <text x="620" y="175" font-family="Inter, sans-serif" font-size="14" font-weight="600" fill="#065F46" text-anchor="middle">Gemini AI</text>
-  <text x="620" y="195" font-family="Inter, sans-serif" font-size="11" fill="#047857" text-anchor="middle">2.5 Flash Native Audio</text>
-  <circle cx="620" cy="215" r="15" fill="#10B981" fill-opacity="0.1"/>
-  <path d="M615 215L620 210L625 215L620 220L615 215Z" fill="#10B981"/>
+  <rect x="430" y="450" width="340" height="50" rx="8" fill="#334155"/>
+  <text x="600" y="480" font-family="Inter, sans-serif" font-size="14" font-weight="600" fill="#F1F5F9" text-anchor="middle">OAuth 2.0 Flow Handler</text>
 
-  <!-- Database Section -->
-  <path d="M450 300H520" stroke="#6366F1" stroke-width="2"/>
-  <path d="M515 295L525 300L515 305" fill="#6366F1"/>
-  <rect x="530" y="260" width="180" height="100" rx="12" fill="white" stroke="#6366F1" stroke-width="2"/>
-  <text x="620" y="295" font-family="Inter, sans-serif" font-size="14" font-weight="600" fill="#3730A3" text-anchor="middle">Database</text>
-  <text x="620" y="315" font-family="Inter, sans-serif" font-size="11" fill="#4338CA" text-anchor="middle">SQLite / Firestore</text>
-  <path d="M610 325C610 322 630 322 630 325M610 325V335C610 338 630 338 630 335V325M610 325C610 328 630 328 630 325" stroke="#6366F1" stroke-width="1.5"/>
+  <!-- --- AI ENGINE --- -->
+  <rect x="850" y="150" width="250" height="150" rx="20" fill="white" stroke="#10B981" stroke-width="3"/>
+  <text x="975" y="190" font-family="Inter, sans-serif" font-size="18" font-weight="700" fill="#065F46" text-anchor="middle">Gemini 2.5 Flash</text>
+  <text x="975" y="215" font-family="Inter, sans-serif" font-size="12" fill="#047857" text-anchor="middle">Multimodal Live API</text>
+  
+  <!-- AI Features -->
+  <circle cx="910" cy="250" r="15" fill="#D1FAE5"/>
+  <text x="910" y="254" font-family="Inter, sans-serif" font-size="10" fill="#065F46" text-anchor="middle">🎤</text>
+  <text x="910" y="275" font-family="Inter, sans-serif" font-size="9" fill="#065F46" text-anchor="middle">Audio</text>
+  
+  <circle cx="975" cy="250" r="15" fill="#D1FAE5"/>
+  <text x="975" y="254" font-family="Inter, sans-serif" font-size="10" fill="#065F46" text-anchor="middle">💬</text>
+  <text x="975" y="275" font-family="Inter, sans-serif" font-size="9" fill="#065F46" text-anchor="middle">Text</text>
+  
+  <circle cx="1040" cy="250" r="15" fill="#D1FAE5"/>
+  <text x="1040" y="254" font-family="Inter, sans-serif" font-size="10" fill="#065F46" text-anchor="middle">🛠️</text>
+  <text x="1040" y="275" font-family="Inter, sans-serif" font-size="9" fill="#065F46" text-anchor="middle">Tools</text>
 
-  <!-- External Tools Section -->
-  <path d="M350 350V410" stroke="#F59E0B" stroke-width="2"/>
-  <path d="M345 405L350 415L355 405" fill="#F59E0B"/>
-  <rect x="250" y="420" width="300" height="60" rx="12" fill="white" stroke="#F59E0B" stroke-width="2"/>
-  <text x="400" y="445" font-family="Inter, sans-serif" font-size="14" font-weight="600" fill="#92400E" text-anchor="middle">External Integrations &amp; Tools</text>
-  <text x="400" y="465" font-family="Inter, sans-serif" font-size="11" fill="#B45309" text-anchor="middle">WhatsApp • Email • Product Catalog API</text>
+  <!-- AI Connection -->
+  <path d="M800 225H850" stroke="#10B981" stroke-width="3"/>
+  <path d="M845 220L855 225L845 230" fill="#10B981"/>
+  <text x="825" y="215" font-family="Inter, sans-serif" font-size="10" font-weight="600" fill="#10B981" text-anchor="middle">Live API</text>
 
-  <!-- Legend / Flow -->
-  <text x="70" y="480" font-family="Inter, sans-serif" font-size="10" fill="#94A3B8">© 2026 Drisa_AI Agent System Architecture</text>
+  <!-- --- DATA LAYER --- -->
+  <rect x="850" y="350" width="250" height="150" rx="20" fill="white" stroke="#F59E0B" stroke-width="3"/>
+  <text x="975" y="390" font-family="Inter, sans-serif" font-size="18" font-weight="700" fill="#92400E" text-anchor="middle">Google Firestore</text>
+  <text x="975" y="415" font-family="Inter, sans-serif" font-size="12" fill="#B45309" text-anchor="middle">NoSQL Document Store</text>
+  
+  <!-- Data Collections -->
+  <rect x="870" y="435" width="60" height="40" rx="6" fill="#FEF3C7"/>
+  <text x="900" y="455" font-family="Inter, sans-serif" font-size="9" font-weight="600" fill="#92400E" text-anchor="middle">Products</text>
+  
+  <rect x="945" y="435" width="60" height="40" rx="6" fill="#FEF3C7"/>
+  <text x="975" y="455" font-family="Inter, sans-serif" font-size="9" font-weight="600" fill="#92400E" text-anchor="middle">Leads</text>
+  
+  <rect x="1020" y="435" width="60" height="40" rx="6" fill="#FEF3C7"/>
+  <text x="1050" y="455" font-family="Inter, sans-serif" font-size="9" font-weight="600" fill="#92400E" text-anchor="middle">Settings</text>
+
+  <!-- Data Connection -->
+  <path d="M800 425H850" stroke="#F59E0B" stroke-width="3"/>
+  <path d="M845 420L855 425L845 430" fill="#F59E0B"/>
+  <text x="825" y="415" font-family="Inter, sans-serif" font-size="10" font-weight="600" fill="#F59E0B" text-anchor="middle">Persistence</text>
+
+  <!-- --- EXTERNAL INTEGRATIONS --- -->
+  <text x="600" y="560" font-family="Inter, sans-serif" font-size="16" font-weight="700" fill="#475569" text-anchor="middle">EXTERNAL INTEGRATIONS &amp; FLOWS</text>
+  
+  <rect x="100" y="600" width="1000" height="150" rx="24" fill="white" stroke="#94A3B8" stroke-width="2" stroke-dasharray="8 4"/>
+  
+  <!-- Google Calendar -->
+  <rect x="150" y="630" width="180" height="90" rx="12" fill="#F8FAFC" stroke="#4285F4" stroke-width="2"/>
+  <text x="240" y="660" font-family="Inter, sans-serif" font-size="14" font-weight="700" fill="#1E40AF" text-anchor="middle">Google Calendar</text>
+  <text x="240" y="680" font-family="Inter, sans-serif" font-size="11" fill="#3B82F6" text-anchor="middle">Appointment Booking</text>
+  <text x="240" y="700" font-family="Inter, sans-serif" font-size="10" fill="#64748B" text-anchor="middle">OAuth 2.0 / v3 API</text>
+
+  <!-- Twilio / Voice -->
+  <rect x="380" y="630" width="180" height="90" rx="12" fill="#F8FAFC" stroke="#F22F46" stroke-width="2"/>
+  <text x="470" y="660" font-family="Inter, sans-serif" font-size="14" font-weight="700" fill="#991B1B" text-anchor="middle">Twilio / Voice</text>
+  <text x="470" y="680" font-family="Inter, sans-serif" font-size="11" fill="#EF4444" text-anchor="middle">Telephony Integration</text>
+  <text x="470" y="700" font-family="Inter, sans-serif" font-size="10" fill="#64748B" text-anchor="middle">Media Streams (mu-law)</text>
+
+  <!-- WhatsApp / SMS -->
+  <rect x="610" y="630" width="180" height="90" rx="12" fill="#F8FAFC" stroke="#25D366" stroke-width="2"/>
+  <text x="700" y="660" font-family="Inter, sans-serif" font-size="14" font-weight="700" fill="#065F46" text-anchor="middle">Meta WhatsApp API</text>
+  <text x="700" y="680" font-family="Inter, sans-serif" font-size="11" fill="#10B981" text-anchor="middle">Customer Follow-up</text>
+  <text x="700" y="700" font-family="Inter, sans-serif" font-size="10" fill="#64748B" text-anchor="middle">Business Cloud API</text>
+
+  <!-- Email Service -->
+  <rect x="840" y="630" width="180" height="90" rx="12" fill="#F8FAFC" stroke="#EA4335" stroke-width="2"/>
+  <text x="930" y="660" font-family="Inter, sans-serif" font-size="14" font-weight="700" fill="#991B1B" text-anchor="middle">Email Service</text>
+  <text x="930" y="680" font-family="Inter, sans-serif" font-size="11" fill="#EF4444" text-anchor="middle">Nodemailer / SMTP</text>
+  <text x="930" y="700" font-family="Inter, sans-serif" font-size="10" fill="#64748B" text-anchor="middle">Lead Notifications</text>
+
+  <!-- Integration Arrows -->
+  <path d="M600 520V600" stroke="#94A3B8" stroke-width="2"/>
+  <path d="M595 595L600 605L605 595" fill="#94A3B8"/>
+  <text x="630" y="580" font-family="Inter, sans-serif" font-size="10" font-weight="600" fill="#64748B" text-anchor="start">Tool Execution Flow</text>
+
+  <!-- Footer -->
+  <text x="600" y="780" font-family="Inter, sans-serif" font-size="12" fill="#94A3B8" text-anchor="middle">© 2026 Drisa_AI • Professional Multimodal AI Agent Architecture • Hackathon Edition</text>
 </svg>
