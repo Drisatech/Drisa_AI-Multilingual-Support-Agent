@@ -229,6 +229,28 @@ Alternatively, you can add it to your theme's `footer.php` file just before the 
 
 ---
 
+## 🛠️ Troubleshooting
+
+### 1. Login Issues (Firebase Auth)
+If you encounter errors like `ERR_QUIC_PROTOCOL_ERROR` or `auth/unauthorized-domain` during login:
+
+*   **Authorized Domains**: Ensure your deployment URL is added to the **Authorized Domains** list in the Firebase Console.
+    1. Go to [Firebase Console](https://console.firebase.google.com/).
+    2. Select your project.
+    3. Go to **Authentication** > **Settings** > **Authorized domains**.
+    4. Add your Cloud Run URL (e.g., `drisa-ai-agent-448742322230.us-central1.run.app`).
+*   **Browser Protocol Error**: If you see `ERR_QUIC_PROTOCOL_ERROR`, it's a browser-level issue with the QUIC protocol.
+    *   Try a different browser (e.g., Firefox or Safari).
+    *   In Chrome, you can temporarily disable QUIC by visiting `chrome://flags/#enable-quic` and setting it to **Disabled**.
+*   **Popup Blocked**: Ensure your browser allows popups for your application domain.
+
+### 2. Firestore Permissions
+If you see "Missing or insufficient permissions":
+*   Ensure you have deployed the `firestore.rules` using the `deploy_firebase` tool or manually in the Firebase Console.
+*   Check that you are logged in with an account that has the `admin` role in the `users` collection.
+
+---
+
 ## 👨‍💻 About Me
 
 ### 🧠 Aliyu Idris Adeiza

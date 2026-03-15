@@ -270,7 +270,7 @@ export default function App() {
     } catch (err: any) {
       console.error("Login catch block:", err.code, err.message);
       if (err.code === 'auth/unauthorized-domain') {
-        alert(`Domain Unauthorized: Please add ${window.location.hostname} to your Firebase Console (Authentication -> Settings -> Authorized domains).`);
+        alert(`Domain Unauthorized: Please add ${window.location.hostname} to your Firebase Console (Authentication -> Settings -> Authorized domains). Refer to the Troubleshooting section in README.md for more details.`);
       } else if (err.code !== 'auth/cancelled-popup-request' && err.code !== 'auth/popup-closed-by-user') {
         alert(`Login failed: ${err.message} (${err.code})`);
       }
