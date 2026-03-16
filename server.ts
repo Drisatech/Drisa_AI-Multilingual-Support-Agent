@@ -196,6 +196,7 @@ function pcmToMulaw(base64Payload: string): string {
     }
     
     const wav = new WaveFile();
+    // Gemini Live API (09-2025) outputs 24kHz PCM.
     wav.fromScratch(1, 24000, '16', samples16);
     wav.toSampleRate(8000);
     wav.toBitDepth('8m');
@@ -235,7 +236,9 @@ app.get('/api/config', (req, res) => {
     firestoreDatabaseId: process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID,
     storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET,
     messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-    geminiApiKey: process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY
+    geminiApiKey: process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY,
+    appUrl: process.env.APP_URL,
+    sharedAppUrl: process.env.SHARED_APP_URL
   });
 });
 
@@ -649,23 +652,34 @@ app.post('/api/sessions/log', async (req, res) => {
 });
 
 // Twilio Voice Webhook
-app.post('/api/twilio/voice', (req, res) => {
+app.all('/api/twilio/voice', (req, res) => {
   console.log(`[Twilio] Webhook received: ${req.method} ${req.url}`);
-  console.log(`[Twilio] Body:`, JSON.stringify(req.body));
+  console.log(`[Twilio] Headers:`, JSON.stringify(req.headers));
+  
+  // Twilio sends data in body for POST, in query for GET
+  const data = req.method === 'POST' ? req.body : req.query;
+  console.log(`[Twilio] Data:`, JSON.stringify(data));
   
   try {
-    const from = req.body.From || 'Unknown';
+    const from = data.From || 'Unknown';
     console.log(`[Twilio] Incoming call from: ${from}`);
     
     // Robust host detection
-    let host = req.get('host');
-    if (process.env.APP_URL) {
+    // Priority: 
+    // 1. x-forwarded-host (set by proxy)
+    // 2. host header
+    // 3. APP_URL (only if detected host is local/missing)
+    let host = req.get('x-forwarded-host') || req.get('host');
+    
+    const isLocal = !host || host.includes('localhost') || host.includes('127.0.0.1') || host.includes('0.0.0.0');
+    
+    if (isLocal && process.env.APP_URL) {
       try {
         const appUrl = new URL(process.env.APP_URL);
         host = appUrl.host;
-        console.log(`[Twilio] Using host from APP_URL: ${host}`);
+        console.log(`[Twilio] Using host from APP_URL (fallback): ${host}`);
       } catch (e) {
-        console.warn(`[Twilio] Invalid APP_URL: ${process.env.APP_URL}. Using req.get('host').`);
+        console.warn(`[Twilio] Invalid APP_URL: ${process.env.APP_URL}`);
       }
     }
 
@@ -674,12 +688,15 @@ app.post('/api/twilio/voice', (req, res) => {
       return res.status(500).send('Could not determine host');
     }
 
-    const streamUrl = `wss://${host}/api/twilio/stream`;
+    // Determine protocol - Twilio Media Streams REQUIRE wss:// in production
+    // In AI Studio/Cloud Run, we are always behind an SSL proxy.
+    const protocol = (host.includes('localhost') || host.includes('0.0.0.0')) ? 'ws' : 'wss';
+    const streamUrl = `${protocol}://${host}/api/twilio/stream`;
     console.log(`[Twilio] Generated Stream URL: ${streamUrl}`);
     
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say>Welcome to DrisaTech AI Support. Please wait while we connect you.</Say>
+  <Say>Welcome to DrisaTech AI Support. Please wait while we connect you to our AI agent.</Say>
   <Connect>
     <Stream url="${streamUrl}">
       <Parameter name="from" value="${from}" />
@@ -875,12 +892,12 @@ async function startServer() {
 
   server.on('upgrade', (request, socket, head) => {
     try {
-      const host = request.headers.host || 'localhost';
-      const url = new URL(request.url!, `http://${host}`);
+      // Use a fixed base for URL parsing as we only care about the pathname
+      const url = new URL(request.url!, 'http://localhost');
       const pathname = url.pathname;
       const ip = (request.headers['x-forwarded-for'] as string || request.socket.remoteAddress || 'unknown').split(',')[0].trim();
       
-      console.log(`[Upgrade] Request for ${pathname} from ${ip}`);
+      console.log(`[Upgrade] Request for ${pathname} from ${ip}. Host: ${request.headers.host}`);
       
       if (pathname.startsWith('/api/twilio/stream')) {
         console.log('[Upgrade] Handling Twilio stream upgrade');
@@ -905,6 +922,11 @@ async function startServer() {
   });  // Twilio Stream Handler (Mu-law 8000Hz)
   twilioWss.on('connection', (ws: WebSocket) => {
     console.log(`[Twilio] New stream connection`);
+    
+    ws.on('error', (err) => {
+      console.error('[Twilio] WebSocket error:', err);
+    });
+
     let streamSid: string;
     let geminiSession: any;
     let transcript: {role: string, text: string}[] = [];
@@ -918,90 +940,112 @@ async function startServer() {
       return;
     }
 
+    console.log(`[Twilio] Using API Key: ${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}`);
     const ai = new GoogleGenAI({ apiKey });
 
     ws.on('message', async (message: any) => {
-      const data = JSON.parse(message.toString());
-      if (data.event === 'start') {
-        streamSid = data.streamSid;
-        fromNumber = data.start?.customParameters?.from || 'Unknown';
-        console.log(`[Twilio] Stream started: ${streamSid} from ${fromNumber}`);
-        
-        const { instruction, defaultLanguage } = await getSystemInstruction();
-        
-        geminiSession = await ai.live.connect({
-          model: "gemini-2.5-flash-native-audio-preview-09-2025",
-          config: {
-            responseModalities: [Modality.AUDIO],
-            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Charon" } } },
-            systemInstruction: instruction,
-            outputAudioTranscription: {},
-            inputAudioTranscription: {},
-            tools: [
-              { googleSearch: {} },
-              {
-                functionDeclarations: [
-                  { name: "lookupCatalog", parameters: { type: Type.OBJECT, properties: { query: { type: Type.STRING } } } },
-                { name: "sendFollowUp", parameters: { type: Type.OBJECT, properties: { contactType: { type: Type.STRING, enum: ["whatsapp", "email", "sms", "call"], description: "Type of contact: 'whatsapp', 'email', 'sms', or 'call'" }, contactAddress: { type: Type.STRING, description: "The phone number or email address" }, message: { type: Type.STRING, description: "The message to send or speak on the call" } }, required: ["contactType", "contactAddress", "message"] } },
-                { name: "makePhoneCall", parameters: { type: Type.OBJECT, properties: { phoneNumber: { type: Type.STRING, description: "The phone number to call" }, message: { type: Type.STRING, description: "The message to speak when the user answers" } }, required: ["phoneNumber", "message"] } },
-                { name: "checkServiceStatus", parameters: { type: Type.OBJECT, properties: {} } },
-                { name: "bookAppointment", parameters: { type: Type.OBJECT, properties: { summary: { type: Type.STRING }, description: { type: Type.STRING }, startTime: { type: Type.STRING }, endTime: { type: Type.STRING } }, required: ["summary", "startTime", "endTime"] } }
-              ]
-            }]
-          },
-          callbacks: {
-            onopen: () => {
-              console.log('[Twilio] Gemini session opened');
-              // Initial greeting for phone call
-              geminiSession.sendRealtimeInput({
-                parts: [{ text: `Hello! Please introduce yourself briefly as the DrisaTech AI Support Agent and ask how you can help. Greet the user warmly in ${defaultLanguage}.` }]
-              });
-            },
-            onmessage: async (msg) => {
-              // Handle transcriptions
-              if (msg.serverContent?.modelTurn?.parts) {
-                for (const part of msg.serverContent.modelTurn.parts) {
-                  if (part.text) {
-                    transcript.push({ role: 'AI', text: part.text });
+      try {
+        const data = JSON.parse(message.toString());
+        if (data.event === 'start') {
+          streamSid = data.streamSid;
+          fromNumber = data.start?.customParameters?.from || 'Unknown';
+          console.log(`[Twilio] Stream started: ${streamSid} from ${fromNumber}`);
+          
+          const { instruction, defaultLanguage } = await getSystemInstruction();
+          
+          try {
+            geminiSession = await ai.live.connect({
+              model: "gemini-2.5-flash-native-audio-preview-09-2025",
+              config: {
+                responseModalities: [Modality.AUDIO],
+                speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Charon" } } },
+                systemInstruction: instruction,
+                outputAudioTranscription: {},
+                inputAudioTranscription: {},
+                tools: [
+                  { googleSearch: {} },
+                  {
+                    functionDeclarations: [
+                      { name: "lookupCatalog", parameters: { type: Type.OBJECT, properties: { query: { type: Type.STRING } } } },
+                    { name: "sendFollowUp", parameters: { type: Type.OBJECT, properties: { contactType: { type: Type.STRING, enum: ["whatsapp", "email", "sms", "call"], description: "Type of contact: 'whatsapp', 'email', 'sms', or 'call'" }, contactAddress: { type: Type.STRING, description: "The phone number or email address" }, message: { type: Type.STRING, description: "The message to send or speak on the call" } }, required: ["contactType", "contactAddress", "message"] } },
+                    { name: "makePhoneCall", parameters: { type: Type.OBJECT, properties: { phoneNumber: { type: Type.STRING, description: "The phone number to call" }, message: { type: Type.STRING, description: "The message to speak when the user answers" } }, required: ["phoneNumber", "message"] } },
+                    { name: "checkServiceStatus", parameters: { type: Type.OBJECT, properties: {} } },
+                    { name: "bookAppointment", parameters: { type: Type.OBJECT, properties: { summary: { type: Type.STRING }, description: { type: Type.STRING }, startTime: { type: Type.STRING }, endTime: { type: Type.STRING } }, required: ["summary", "startTime", "endTime"] } }
+                  ]
+                }]
+              },
+              callbacks: {
+                onopen: () => {
+                  console.log('[Twilio] Gemini session opened');
+                  // Initial greeting for phone call
+                  geminiSession.sendRealtimeInput({
+                    parts: [{ text: `Hello! Please introduce yourself briefly as the DrisaTech AI Support Agent and ask how you can help. Greet the user warmly in ${defaultLanguage}.` }]
+                  });
+                },
+                onmessage: async (msg) => {
+                  // Handle transcriptions
+                  if (msg.serverContent?.modelTurn?.parts) {
+                    for (const part of msg.serverContent.modelTurn.parts) {
+                      if (part.text) {
+                        transcript.push({ role: 'AI', text: part.text });
+                      }
+                      if (part.inlineData?.data) {
+                        const mulaw = pcmToMulaw(part.inlineData.data);
+                        if (mulaw) ws.send(JSON.stringify({ event: 'media', streamSid, media: { payload: mulaw } }));
+                      }
+                    }
                   }
-                  if (part.inlineData?.data) {
-                    const mulaw = pcmToMulaw(part.inlineData.data);
-                    if (mulaw) ws.send(JSON.stringify({ event: 'media', streamSid, media: { payload: mulaw } }));
+                  
+                  // Handle user transcriptions
+                  const userTurn = (msg.serverContent as any)?.userTurn;
+                  if (userTurn?.parts) {
+                    for (const part of userTurn.parts) {
+                      if (part.text) {
+                        transcript.push({ role: 'User', text: part.text });
+                      }
+                    }
                   }
+    
+                  // Handle tool calls
+                  if (msg.toolCall?.functionCalls) {
+                    const responses = await Promise.all(msg.toolCall.functionCalls.map(async (call) => {
+                      let result;
+                      const args = call.args as any;
+                      if (call.name === 'lookupCatalog') result = await lookupCatalog(args.query);
+                      else if (call.name === 'sendFollowUp') result = await sendFollowUp(args.contactType, args.contactAddress, args.message);
+                      else if (call.name === 'makePhoneCall') result = await sendFollowUp('phone', args.phoneNumber, args.message);
+                      else if (call.name === 'checkServiceStatus') result = await checkServiceStatus();
+                      else if (call.name === 'bookAppointment') result = await bookAppointment(args.summary, args.description, args.startTime, args.endTime);
+                      return { id: call.id, name: call.name, response: result };
+                    }));
+                    geminiSession.sendToolResponse({ functionResponses: responses });
+                  }
+                },
+                onerror: (err) => {
+                  console.error('[Twilio] Gemini session error:', err);
+                  ws.close();
+                },
+                onclose: () => {
+                  console.log('[Twilio] Gemini session closed');
+                  ws.close();
                 }
               }
-              
-              // Handle user transcriptions
-              const userTurn = (msg.serverContent as any)?.userTurn;
-              if (userTurn?.parts) {
-                for (const part of userTurn.parts) {
-                  if (part.text) {
-                    transcript.push({ role: 'User', text: part.text });
-                  }
-                }
-              }
-
-              // Handle tool calls
-              if (msg.toolCall?.functionCalls) {
-                const responses = await Promise.all(msg.toolCall.functionCalls.map(async (call) => {
-                  let result;
-                  const args = call.args as any;
-                  if (call.name === 'lookupCatalog') result = await lookupCatalog(args.query);
-                  else if (call.name === 'sendFollowUp') result = await sendFollowUp(args.contactType, args.contactAddress, args.message);
-                  else if (call.name === 'makePhoneCall') result = await sendFollowUp('phone', args.phoneNumber, args.message);
-                  else if (call.name === 'checkServiceStatus') result = await checkServiceStatus();
-                  else if (call.name === 'bookAppointment') result = await bookAppointment(args.summary, args.description, args.startTime, args.endTime);
-                  return { id: call.id, name: call.name, response: result };
-                }));
-                geminiSession.sendToolResponse({ functionResponses: responses });
-              }
-            }
+            });
+          } catch (err) {
+            console.error('[Twilio] Failed to connect to Gemini:', err);
+            ws.close();
           }
-        });
-
-      } else if (data.event === 'media' && geminiSession) {
-        const pcm16 = mulawToPcm16(data.media.payload);
-        if (pcm16) geminiSession.sendRealtimeInput({ media: { data: pcm16, mimeType: 'audio/pcm;rate=16000' } });
+  
+        } else if (data.event === 'media' && geminiSession) {
+          const pcm16 = mulawToPcm16(data.media.payload);
+          if (pcm16) geminiSession.sendRealtimeInput({ media: { data: pcm16, mimeType: 'audio/pcm;rate=16000' } });
+        } else if (data.event === 'stop') {
+          console.log(`[Twilio] Stream stopped: ${streamSid}`);
+          ws.close();
+        }
+      } catch (err) {
+        console.error('[Twilio] Error processing message:', err);
+        ws.close();
       }
     });
 

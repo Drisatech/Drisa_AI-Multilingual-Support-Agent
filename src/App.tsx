@@ -90,6 +90,7 @@ export default function App() {
   const [twilioSid, setTwilioSid] = useState('');
   const [twilioToken, setTwilioToken] = useState('');
   const [twilioNumber, setTwilioNumber] = useState('');
+  const [appUrls, setAppUrls] = useState<{appUrl?: string, sharedAppUrl?: string}>({});
   const [smtpUser, setSmtpUser] = useState('');
   const [smtpPass, setSmtpPass] = useState('');
   const [smtpHost, setSmtpHost] = useState('');
@@ -325,6 +326,15 @@ export default function App() {
     } else if (isAdmin && activeTab === 'settings' && fdb) {
       const fetchSettings = async () => {
         try {
+          // Fetch App URLs from backend
+          try {
+            const configRes = await fetch('/api/config');
+            const config = await configRes.json();
+            setAppUrls({ appUrl: config.appUrl, sharedAppUrl: config.sharedAppUrl });
+          } catch (e) {
+            console.error("Error fetching app config:", e);
+          }
+
           // Fetch WhatsApp Settings
           const waRef = doc(fdb, 'settings', 'whatsapp');
           const waSnap = await getDoc(waRef);
@@ -1365,10 +1375,25 @@ export default function App() {
                 <div className="space-y-4">
                   <div className="p-4 rounded-xl bg-brand-primary/10 border border-brand-primary/20 mb-4">
                     <div className="text-[10px] font-bold uppercase tracking-wider text-brand-primary mb-1">Webhook URL</div>
-                    <div className="text-xs font-mono break-all text-brand-primary select-all">
-                      {window.location.origin}/api/twilio/voice
+                    <div className="space-y-3">
+                      <div>
+                        <div className="text-[9px] text-zinc-500 mb-1 uppercase font-bold">Current Environment</div>
+                        <div className="text-xs font-mono break-all text-brand-primary select-all p-2 bg-white/50 rounded border border-brand-primary/10">
+                          {window.location.origin}/api/twilio/voice
+                        </div>
+                      </div>
+                      {appUrls.sharedAppUrl && appUrls.sharedAppUrl !== window.location.origin && (
+                        <div>
+                          <div className="text-[9px] text-zinc-500 mb-1 uppercase font-bold">Deployed / Shared URL (Recommended)</div>
+                          <div className="text-xs font-mono break-all text-brand-primary select-all p-2 bg-white/50 rounded border border-brand-primary/10">
+                            {appUrls.sharedAppUrl.replace(/\/$/, '')}/api/twilio/voice
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <p className="text-[10px] mt-2 text-zinc-500">Copy this to your Twilio Phone Number's "A CALL COMES IN" webhook setting.</p>
+                    <p className="text-[10px] mt-3 text-zinc-500 leading-relaxed">
+                      Copy the <strong>Shared URL</strong> to your Twilio Console's "A CALL COMES IN" setting for the most stable connection.
+                    </p>
                   </div>
 
                   <div>
