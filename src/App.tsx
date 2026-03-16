@@ -520,6 +520,13 @@ export default function App() {
       alert("Failed to send request. Please try again.");
     }
   };
+
+  const playClickSound = () => {
+    const audio = new Audio('https://www.soundjay.com/buttons/sounds/button-16.mp3');
+    audio.volume = 0.2;
+    audio.play().catch(() => {});
+  };
+
   const handleAddSource = async (type: 'url' | 'article') => {
     if (!isAdmin || !fdb) return;
     setIsProcessing(true);
@@ -878,12 +885,15 @@ export default function App() {
                 <p className={`max-w-md mx-auto ${darkMode ? 'text-white/60' : 'text-zinc-500'}`}>
                   {isConnected 
                     ? `Speaking in ${preferredLanguage}. The agent will automatically detect if you switch languages.` 
-                    : 'Select your preferred language and click connect to start a voice conversation.'}
+                    : 'Select your preferred language and talk to us'}
                 </p>
               </div>
 
               <button
-                onClick={isConnected ? disconnect : () => connect(preferredLanguage)}
+                onClick={() => {
+                  playClickSound();
+                  isConnected ? disconnect() : connect(preferredLanguage);
+                }}
                 disabled={isConnecting}
                 className={`flex items-center gap-2 px-8 py-4 rounded-full font-medium text-lg transition-all shadow-sm ${
                   isConnected 
@@ -898,7 +908,7 @@ export default function App() {
                 ) : error ? (
                   <><Phone className="w-5 h-5" /> Reconnect Agent</>
                 ) : (
-                  <><Phone className="w-5 h-5" /> Connect Agent</>
+                  <><Phone className="w-5 h-5" /> Call Us</>
                 )}
               </button>
               
