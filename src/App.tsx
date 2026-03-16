@@ -87,6 +87,9 @@ export default function App() {
   const [appError, setAppError] = useState<string | null>(null);
   const [whatsappToken, setWhatsappToken] = useState('');
   const [whatsappPhoneId, setWhatsappPhoneId] = useState('');
+  const [twilioSid, setTwilioSid] = useState('');
+  const [twilioToken, setTwilioToken] = useState('');
+  const [twilioNumber, setTwilioNumber] = useState('');
   const [smtpUser, setSmtpUser] = useState('');
   const [smtpPass, setSmtpPass] = useState('');
   const [smtpHost, setSmtpHost] = useState('');
@@ -331,6 +334,16 @@ export default function App() {
             setWhatsappPhoneId(data.phoneNumberId || '');
           }
 
+          // Fetch Twilio Settings
+          const twilioRef = doc(fdb, 'settings', 'twilio');
+          const twilioSnap = await getDoc(twilioRef);
+          if (twilioSnap.exists()) {
+            const data = twilioSnap.data();
+            setTwilioSid(data.accountSid || '');
+            setTwilioToken(data.authToken || '');
+            setTwilioNumber(data.phoneNumber || '');
+          }
+
           // Fetch SMTP Settings
           const smtpRef = doc(fdb, 'settings', 'email');
           const smtpSnap = await getDoc(smtpRef);
@@ -372,6 +385,24 @@ export default function App() {
       alert("WhatsApp settings saved successfully!");
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'settings/whatsapp');
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
+  const handleSaveTwilioSettings = async () => {
+    if (!fdb || !isAdmin) return;
+    setIsSavingSettings(true);
+    try {
+      await setDoc(doc(fdb, 'settings', 'twilio'), {
+        accountSid: twilioSid,
+        authToken: twilioToken,
+        phoneNumber: twilioNumber,
+        updatedAt: serverTimestamp()
+      });
+      alert("Twilio settings saved successfully!");
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'settings/twilio');
     } finally {
       setIsSavingSettings(false);
     }
@@ -1320,6 +1351,74 @@ export default function App() {
                     Connect Google Calendar
                   </button>
                 )}
+              </div>
+
+              <div className={`p-6 rounded-2xl border transition-colors duration-300 ${darkMode ? 'bg-brand-secondary border-white/10' : 'bg-white border-zinc-200'}`}>
+                <div className="flex items-center gap-3 mb-4">
+                  <Phone className="w-5 h-5 text-brand-primary" />
+                  <h3 className={`font-semibold ${darkMode ? 'text-white' : 'text-zinc-900'}`}>Twilio Voice Integration</h3>
+                </div>
+                <p className={`text-sm mb-6 ${darkMode ? 'text-white/60' : 'text-zinc-500'}`}>
+                  Configure your Twilio credentials to allow the agent to handle phone calls.
+                </p>
+                
+                <div className="space-y-4">
+                  <div className="p-4 rounded-xl bg-brand-primary/10 border border-brand-primary/20 mb-4">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-brand-primary mb-1">Webhook URL</div>
+                    <div className="text-xs font-mono break-all text-brand-primary select-all">
+                      {window.location.origin}/api/twilio/voice
+                    </div>
+                    <p className="text-[10px] mt-2 text-zinc-500">Copy this to your Twilio Phone Number's "A CALL COMES IN" webhook setting.</p>
+                  </div>
+
+                  <div>
+                    <label className={`block text-xs font-semibold uppercase tracking-wider mb-2 ${darkMode ? 'text-white/40' : 'text-zinc-500'}`}>
+                      Account SID
+                    </label>
+                    <input 
+                      type="text" 
+                      placeholder="AC..."
+                      value={twilioSid}
+                      onChange={(e) => setTwilioSid(e.target.value)}
+                      className={`w-full px-4 py-2 rounded-xl border transition-colors ${darkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-zinc-50 border-zinc-200 text-zinc-900'}`}
+                    />
+                  </div>
+                  <div>
+                    <label className={`block text-xs font-semibold uppercase tracking-wider mb-2 ${darkMode ? 'text-white/40' : 'text-zinc-500'}`}>
+                      Auth Token
+                    </label>
+                    <input 
+                      type="password" 
+                      placeholder="••••••••"
+                      value={twilioToken}
+                      onChange={(e) => setTwilioToken(e.target.value)}
+                      className={`w-full px-4 py-2 rounded-xl border transition-colors ${darkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-zinc-50 border-zinc-200 text-zinc-900'}`}
+                    />
+                  </div>
+                  <div>
+                    <label className={`block text-xs font-semibold uppercase tracking-wider mb-2 ${darkMode ? 'text-white/40' : 'text-zinc-500'}`}>
+                      Twilio Phone Number
+                    </label>
+                    <input 
+                      type="text" 
+                      placeholder="+1234567890"
+                      value={twilioNumber}
+                      onChange={(e) => setTwilioNumber(e.target.value)}
+                      className={`w-full px-4 py-2 rounded-xl border transition-colors ${darkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-zinc-50 border-zinc-200 text-zinc-900'}`}
+                    />
+                  </div>
+                  <button 
+                    onClick={handleSaveTwilioSettings}
+                    disabled={isSavingSettings}
+                    className="w-full py-3 bg-brand-primary text-white rounded-xl font-medium hover:bg-brand-primary/90 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {isSavingSettings ? (
+                      <><Activity className="w-4 h-4 animate-spin" /> Saving...</>
+                    ) : (
+                      <><CheckCircle2 className="w-4 h-4" /> Save Twilio Settings</>
+                    )}
+                  </button>
+                </div>
               </div>
 
               <div className={`p-6 rounded-2xl border transition-colors duration-300 ${darkMode ? 'bg-brand-secondary border-white/10' : 'bg-white border-zinc-200'}`}>

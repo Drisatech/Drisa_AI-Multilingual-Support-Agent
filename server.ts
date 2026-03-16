@@ -9,6 +9,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { GoogleGenAI, Modality, Type } from '@google/genai';
 import nodemailer from 'nodemailer';
 import { google } from 'googleapis';
+import twilio from 'twilio';
 import { db } from './db.ts';
 import { Firestore } from '@google-cloud/firestore';
 import pkg from 'wavefile';
@@ -100,8 +101,8 @@ TONE & VOICE:
 CONVERSATION RULES:
 1. Keep responses VERY CONCISE (1-2 sentences).
 2. Use 'lookupCatalog' for product inquiries. If the answer is not in the catalog, you MAY use Google Search to provide general helpful information, but always prioritize DrisaTech products.
-3. Use 'sendFollowUp' to capture contact details and send real messages.
-4. Use 'checkServiceStatus' to see if the system is configured correctly.
+3. Use 'sendFollowUp' to capture contact details and send real messages (WhatsApp, Email, SMS, or Voice Call).
+4. Use 'checkServiceStatus' to see if the system is configured correctly (WhatsApp, Twilio, Email, Google Calendar).
 5. Use 'bookAppointment' to schedule meetings or site visits.
 
 IMMEDIATE GREETING RULE:
@@ -368,11 +369,13 @@ async function lookupCatalog(query?: string) {
 async function sendFollowUp(contactType: string, contactAddress: string, message: string) {
   let whatsappResult = "Not attempted";
   let emailResult = "Not attempted";
+  let phoneResult = "Not attempted";
   let realSendSuccess = false;
 
   // Fetch settings from Firestore
   let waSettings: any = null;
   let emailSettings: any = null;
+  let twilioSettings: any = null;
   
   if (firestore) {
     try {
@@ -381,12 +384,16 @@ async function sendFollowUp(contactType: string, contactAddress: string, message
       
       const emailDoc = await firestore.collection('settings').doc('email').get();
       if (emailDoc.exists) emailSettings = emailDoc.data();
+
+      const twilioDoc = await firestore.collection('settings').doc('twilio').get();
+      if (twilioDoc.exists) twilioSettings = twilioDoc.data();
     } catch (e) {
       console.error('[Firestore] Error fetching settings for follow-up:', e);
     }
   }
 
   if (contactType === 'whatsapp') {
+    // ... existing whatsapp logic ...
     const accessToken = waSettings?.accessToken || process.env.WHATSAPP_ACCESS_TOKEN;
     const phoneNumberId = waSettings?.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID;
     if (accessToken && phoneNumberId) {
@@ -421,7 +428,71 @@ async function sendFollowUp(contactType: string, contactAddress: string, message
     }
   }
 
+  if (contactType === 'sms') {
+    const accountSid = twilioSettings?.accountSid || process.env.TWILIO_ACCOUNT_SID;
+    const authToken = twilioSettings?.authToken || process.env.TWILIO_AUTH_TOKEN;
+    const fromNumber = twilioSettings?.phoneNumber || process.env.TWILIO_PHONE_NUMBER;
+
+    if (accountSid && authToken && fromNumber) {
+      try {
+        const client = twilio(accountSid, authToken);
+        let to = contactAddress.trim().replace(/\D/g, '');
+        if (!to.startsWith('+')) {
+          if (to.length <= 11 && !to.startsWith('234')) {
+            to = '+234' + (to.startsWith('0') ? to.substring(1) : to);
+          } else {
+            to = '+' + to;
+          }
+        }
+        await client.messages.create({
+          body: message,
+          from: fromNumber,
+          to: to
+        });
+        return { result: "SUCCESS: Real SMS sent via Twilio." };
+      } catch (err) {
+        return { result: "FAILED: Twilio SMS error - " + (err instanceof Error ? err.message : String(err)) };
+      }
+    } else {
+      return { result: "FAILED: Twilio credentials missing." };
+    }
+  }
+
+  if (contactType === 'phone' || contactType === 'call') {
+    const accountSid = twilioSettings?.accountSid || process.env.TWILIO_ACCOUNT_SID;
+    const authToken = twilioSettings?.authToken || process.env.TWILIO_AUTH_TOKEN;
+    const fromNumber = twilioSettings?.phoneNumber || process.env.TWILIO_PHONE_NUMBER;
+
+    if (accountSid && authToken && fromNumber) {
+      try {
+        const client = twilio(accountSid, authToken);
+        let to = contactAddress.trim().replace(/\D/g, '');
+        if (!to.startsWith('+')) {
+          if (to.length <= 11 && !to.startsWith('234')) {
+            to = '+234' + (to.startsWith('0') ? to.substring(1) : to);
+          } else if (!to.startsWith('+')) {
+            to = '+' + to;
+          }
+        }
+
+        // For a follow-up call, we'll use a simple TwiML that says the message
+        await client.calls.create({
+          twiml: `<Response><Say>${message}</Say></Response>`,
+          to: to,
+          from: fromNumber
+        });
+        phoneResult = "SUCCESS: Outbound call initiated.";
+        realSendSuccess = true;
+      } catch (err) {
+        phoneResult = "FAILED: Twilio error - " + (err instanceof Error ? err.message : String(err));
+      }
+    } else {
+      phoneResult = "FAILED: Twilio credentials missing.";
+    }
+  }
+
   if (contactType === 'email') {
+    // ... existing email logic ...
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(contactAddress)) {
       return { result: "FAILED: Invalid email address format." };
@@ -460,7 +531,7 @@ async function sendFollowUp(contactType: string, contactAddress: string, message
     try {
       await firestore.collection('leads').add({
         contactType,
-        phone: contactType === 'whatsapp' ? contactAddress : '',
+        phone: (contactType === 'whatsapp' || contactType === 'phone') ? contactAddress : '',
         email: contactType === 'email' ? contactAddress : '',
         notes: message,
         createdAt: new Date().toISOString(),
@@ -471,16 +542,32 @@ async function sendFollowUp(contactType: string, contactAddress: string, message
       console.error('[Firestore] Failed to save lead:', e);
     }
   }
-  return { result: contactType === 'whatsapp' ? whatsappResult : emailResult };
+  
+  if (contactType === 'whatsapp') return { result: whatsappResult };
+  if (contactType === 'phone' || contactType === 'call') return { result: phoneResult };
+  return { result: emailResult };
 }
 
 async function checkServiceStatus() {
   const googleCalendarTokens = await getGoogleCalendarTokens();
+  
+  let twilioSettings: any = null;
+  if (firestore) {
+    try {
+      const twilioDoc = await firestore.collection('settings').doc('twilio').get();
+      if (twilioDoc.exists) twilioSettings = twilioDoc.data();
+    } catch (e) {}
+  }
+
   return {
     result: {
       whatsapp: {
         configured: !!(process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID),
         details: process.env.WHATSAPP_ACCESS_TOKEN ? "Token present" : "Token missing"
+      },
+      twilio: {
+        configured: !!(twilioSettings?.accountSid || process.env.TWILIO_ACCOUNT_SID),
+        details: (twilioSettings?.accountSid || process.env.TWILIO_ACCOUNT_SID) ? "Credentials present" : "Credentials missing"
       },
       email: {
         configured: !!(process.env.SMTP_USER && process.env.SMTP_PASS),
@@ -855,7 +942,8 @@ async function startServer() {
               {
                 functionDeclarations: [
                   { name: "lookupCatalog", parameters: { type: Type.OBJECT, properties: { query: { type: Type.STRING } } } },
-                { name: "sendFollowUp", parameters: { type: Type.OBJECT, properties: { contactType: { type: Type.STRING }, contactAddress: { type: Type.STRING }, message: { type: Type.STRING } }, required: ["contactType", "contactAddress", "message"] } },
+                { name: "sendFollowUp", parameters: { type: Type.OBJECT, properties: { contactType: { type: Type.STRING, enum: ["whatsapp", "email", "sms", "call"], description: "Type of contact: 'whatsapp', 'email', 'sms', or 'call'" }, contactAddress: { type: Type.STRING, description: "The phone number or email address" }, message: { type: Type.STRING, description: "The message to send or speak on the call" } }, required: ["contactType", "contactAddress", "message"] } },
+                { name: "makePhoneCall", parameters: { type: Type.OBJECT, properties: { phoneNumber: { type: Type.STRING, description: "The phone number to call" }, message: { type: Type.STRING, description: "The message to speak when the user answers" } }, required: ["phoneNumber", "message"] } },
                 { name: "checkServiceStatus", parameters: { type: Type.OBJECT, properties: {} } },
                 { name: "bookAppointment", parameters: { type: Type.OBJECT, properties: { summary: { type: Type.STRING }, description: { type: Type.STRING }, startTime: { type: Type.STRING }, endTime: { type: Type.STRING } }, required: ["summary", "startTime", "endTime"] } }
               ]
@@ -900,6 +988,7 @@ async function startServer() {
                   const args = call.args as any;
                   if (call.name === 'lookupCatalog') result = await lookupCatalog(args.query);
                   else if (call.name === 'sendFollowUp') result = await sendFollowUp(args.contactType, args.contactAddress, args.message);
+                  else if (call.name === 'makePhoneCall') result = await sendFollowUp('phone', args.phoneNumber, args.message);
                   else if (call.name === 'checkServiceStatus') result = await checkServiceStatus();
                   else if (call.name === 'bookAppointment') result = await bookAppointment(args.summary, args.description, args.startTime, args.endTime);
                   return { id: call.id, name: call.name, response: result };
