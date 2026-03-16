@@ -957,6 +957,15 @@ async function startServer() {
     console.log(`[Twilio] Using API Key: ${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}`);
     const ai = new GoogleGenAI({ apiKey });
 
+    ws.on('close', () => {
+      console.log(`[Twilio] WebSocket connection closed for stream: ${streamSid}`);
+      if (geminiSession) {
+        try {
+          geminiSession.close();
+        } catch (e) {}
+      }
+    });
+
     ws.on('message', async (message: any) => {
       try {
         const data = JSON.parse(message.toString());
@@ -968,6 +977,7 @@ async function startServer() {
           const { instruction, defaultLanguage } = await getSystemInstruction();
           
           try {
+            console.log(`[Twilio] Connecting to Gemini Live API with model: gemini-2.5-flash-native-audio-preview-09-2025`);
             geminiSession = await ai.live.connect({
               model: "gemini-2.5-flash-native-audio-preview-09-2025",
               config: {
@@ -976,17 +986,6 @@ async function startServer() {
                 systemInstruction: instruction,
                 outputAudioTranscription: {},
                 inputAudioTranscription: {},
-                // Request 16kHz for cleaner resampling
-                generationConfig: {
-                  responseModalities: ["AUDIO"],
-                  speechConfig: {
-                    voiceConfig: {
-                      prebuiltVoiceConfig: {
-                        voiceName: "Charon"
-                      }
-                    }
-                  }
-                } as any,
                 tools: [
                   { googleSearch: {} },
                   {
@@ -1001,7 +1000,7 @@ async function startServer() {
               },
               callbacks: {
                 onopen: () => {
-                  console.log('[Twilio] Gemini session opened');
+                  console.log('[Twilio] Gemini session opened successfully');
                   // Initial greeting for phone call
                   geminiSession.sendRealtimeInput({
                     parts: [{ text: `Hello! Please introduce yourself briefly as the DrisaTech AI Support Agent and ask how you can help. Greet the user warmly in ${defaultLanguage}.` }]
