@@ -26,6 +26,7 @@
     "nodemailer": "^8.0.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "tsx": "^4.21.0",
     "twilio": "^5.13.0",
     "vite": "^6.2.0",
     "wavefile": "^11.0.0",
@@ -38,7 +39,6 @@
     "@types/ws": "^8.18.1",
     "autoprefixer": "^10.4.21",
     "tailwindcss": "^4.1.14",
-    "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }

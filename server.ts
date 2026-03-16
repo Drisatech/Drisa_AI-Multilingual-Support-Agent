@@ -182,7 +182,7 @@ function mulawToPcm16(base64Payload: string): string {
   }
 }
 
-function pcmToMulaw(base64Payload: string): string {
+function pcmToMulaw(base64Payload: string): string[] {
   try {
     const buffer = Buffer.from(base64Payload, 'base64');
     if (buffer.length % 2 !== 0) {
@@ -191,8 +191,8 @@ function pcmToMulaw(base64Payload: string): string {
     
     const samples16 = new Int16Array(buffer.length / 2);
     for (let i = 0; i < samples16.length; i++) {
-      // 80% gain to prevent clipping while maintaining volume
-      samples16[i] = Math.floor(buffer.readInt16LE(i * 2) * 0.8);
+      // 70% gain to prevent clipping and reduce distortion
+      samples16[i] = Math.floor(buffer.readInt16LE(i * 2) * 0.7);
     }
     
     const wav = new WaveFile();
@@ -202,10 +202,18 @@ function pcmToMulaw(base64Payload: string): string {
     wav.toBitDepth('8m');
     const samples = wav.getSamples(false, Uint8Array);
     
-    return Buffer.from(samples).toString('base64');
+    // Chunk into 160-byte pieces (20ms each) for Twilio
+    const chunks: string[] = [];
+    const rawBuffer = Buffer.from(samples);
+    for (let i = 0; i < rawBuffer.length; i += 160) {
+      const chunk = rawBuffer.slice(i, i + 160);
+      chunks.push(chunk.toString('base64'));
+    }
+    
+    return chunks;
   } catch (e) {
     console.error('[Audio] pcmToMulaw failed:', e);
-    return '';
+    return [];
   }
 }
 
@@ -652,7 +660,7 @@ app.post('/api/sessions/log', async (req, res) => {
 });
 
 // Twilio Voice Webhook
-app.all('/api/twilio/voice', (req, res) => {
+app.all(['/api/twilio/voice', '/api/twilio/voice/'], (req, res) => {
   console.log(`[Twilio] Webhook received: ${req.method} ${req.url}`);
   console.log(`[Twilio] Headers:`, JSON.stringify(req.headers));
   
@@ -713,6 +721,12 @@ app.all('/api/twilio/voice', (req, res) => {
     console.error('[Twilio] Webhook error:', err);
     res.status(500).send('Internal Server Error');
   }
+});
+
+// Twilio Status Callback (to avoid 404s)
+app.all(['/api/twilio/status', '/api/twilio/status/'], (req, res) => {
+  console.log(`[Twilio] Status Callback: ${req.method} ${req.url}`);
+  res.status(200).send('OK');
 });
 
 // --- Vite Middleware for Development ---
@@ -962,6 +976,17 @@ async function startServer() {
                 systemInstruction: instruction,
                 outputAudioTranscription: {},
                 inputAudioTranscription: {},
+                // Request 16kHz for cleaner resampling
+                generationConfig: {
+                  responseModalities: ["AUDIO"],
+                  speechConfig: {
+                    voiceConfig: {
+                      prebuiltVoiceConfig: {
+                        voiceName: "Charon"
+                      }
+                    }
+                  }
+                } as any,
                 tools: [
                   { googleSearch: {} },
                   {
@@ -990,8 +1015,10 @@ async function startServer() {
                         transcript.push({ role: 'AI', text: part.text });
                       }
                       if (part.inlineData?.data) {
-                        const mulaw = pcmToMulaw(part.inlineData.data);
-                        if (mulaw) ws.send(JSON.stringify({ event: 'media', streamSid, media: { payload: mulaw } }));
+                        const mulawChunks = pcmToMulaw(part.inlineData.data);
+                        for (const chunk of mulawChunks) {
+                          ws.send(JSON.stringify({ event: 'media', streamSid, media: { payload: chunk } }));
+                        }
                       }
                     }
                   }
