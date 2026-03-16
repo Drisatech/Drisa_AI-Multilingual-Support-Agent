@@ -5,6 +5,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { createServer as createHttpServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { GoogleGenAI, Modality, Type } from '@google/genai';
 import nodemailer from 'nodemailer';
@@ -62,6 +63,7 @@ const PORT = (process.env.APPLET_ID) ? 3000 : (Number(process.env.PORT) || 8080)
 console.log(`[Server] Starting up...`);
 console.log(`[Server] Environment: ${process.env.NODE_ENV}`);
 console.log(`[Server] PORT: ${PORT} (Source: ${process.env.APPLET_ID ? 'AI Studio Override' : (process.env.PORT ? 'Env Var' : 'Default')})`);
+console.log(`[Server] Gemini API Key present: ${!!(process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY)}`);
 
 async function getSystemInstruction() {
   let companyName = "DrisaTech";
@@ -699,7 +701,10 @@ app.all(['/api/twilio/voice', '/api/twilio/voice/'], (req, res) => {
     // Determine protocol - Twilio Media Streams REQUIRE wss:// in production
     // In AI Studio/Cloud Run, we are always behind an SSL proxy.
     const protocol = (host.includes('localhost') || host.includes('0.0.0.0')) ? 'ws' : 'wss';
-    const streamUrl = `${protocol}://${host}/api/twilio/stream`;
+    
+    // Ensure host doesn't have a port if it's already a standard one
+    const cleanHost = host.split(':')[0];
+    const streamUrl = `${protocol}://${cleanHost}/api/twilio/stream`;
     console.log(`[Twilio] Generated Stream URL: ${streamUrl}`);
     
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -896,18 +901,20 @@ async function startServer() {
     });
   }
 
-  const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  const httpServer = createHttpServer(app);
 
   // --- WebSocket Server for Twilio Streams ---
   const twilioWss = new WebSocketServer({ noServer: true });
   const browserWss = new WebSocketServer({ noServer: true });
 
-  server.on('upgrade', (request, socket, head) => {
+  httpServer.on('upgrade', (request, socket, head) => {
     try {
+      const requestUrl = request.url || '';
+      const host = request.headers.host || 'unknown';
+      console.log(`[Upgrade] Incoming upgrade request: ${requestUrl} on host ${host}`);
+
       // Use a fixed base for URL parsing as we only care about the pathname
-      const url = new URL(request.url!, 'http://localhost');
+      const url = new URL(requestUrl, 'http://localhost');
       const pathname = url.pathname;
       const ip = (request.headers['x-forwarded-for'] as string || request.socket.remoteAddress || 'unknown').split(',')[0].trim();
       
@@ -957,7 +964,7 @@ async function startServer() {
     console.log(`[Twilio] Using API Key: ${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}`);
     const ai = new GoogleGenAI({ apiKey });
 
-    ws.on('close', () => {
+    ws.on('close', async () => {
       console.log(`[Twilio] WebSocket connection closed for stream: ${streamSid}`);
       if (geminiSession) {
         try {
@@ -968,7 +975,10 @@ async function startServer() {
 
     ws.on('message', async (message: any) => {
       try {
-        const data = JSON.parse(message.toString());
+        const msgString = message.toString();
+        const data = JSON.parse(msgString);
+        console.log(`[Twilio] Received event: ${data.event}`);
+        
         if (data.event === 'start') {
           streamSid = data.streamSid;
           fromNumber = data.start?.customParameters?.from || 'Unknown';
@@ -977,7 +987,7 @@ async function startServer() {
           const { instruction, defaultLanguage } = await getSystemInstruction();
           
           try {
-            console.log(`[Twilio] Connecting to Gemini Live API with model: gemini-2.5-flash-native-audio-preview-09-2025`);
+            console.log(`[Twilio] Connecting to Gemini Live API...`);
             geminiSession = await ai.live.connect({
               model: "gemini-2.5-flash-native-audio-preview-09-2025",
               config: {
@@ -1001,83 +1011,103 @@ async function startServer() {
               callbacks: {
                 onopen: () => {
                   console.log('[Twilio] Gemini session opened successfully');
-                  // Initial greeting for phone call
-                  geminiSession.sendRealtimeInput({
-                    parts: [{ text: `Hello! Please introduce yourself briefly as the DrisaTech AI Support Agent and ask how you can help. Greet the user warmly in ${defaultLanguage}.` }]
-                  });
+                  try {
+                    geminiSession.sendRealtimeInput({
+                      parts: [{ text: `Hello! Please introduce yourself briefly as the DrisaTech AI Support Agent and ask how you can help. Greet the user warmly in ${defaultLanguage}.` }]
+                    });
+                  } catch (e) {
+                    console.error('[Twilio] Error sending initial greeting:', e);
+                  }
                 },
                 onmessage: async (msg) => {
-                  // Handle transcriptions
-                  if (msg.serverContent?.modelTurn?.parts) {
-                    for (const part of msg.serverContent.modelTurn.parts) {
-                      if (part.text) {
-                        transcript.push({ role: 'AI', text: part.text });
-                      }
-                      if (part.inlineData?.data) {
-                        const mulawChunks = pcmToMulaw(part.inlineData.data);
-                        for (const chunk of mulawChunks) {
-                          ws.send(JSON.stringify({ event: 'media', streamSid, media: { payload: chunk } }));
+                  try {
+                    // Handle transcriptions
+                    if (msg.serverContent?.modelTurn?.parts) {
+                      for (const part of msg.serverContent.modelTurn.parts) {
+                        if (part.text) {
+                          transcript.push({ role: 'AI', text: part.text });
+                        }
+                        if (part.inlineData?.data) {
+                          const mulawChunks = pcmToMulaw(part.inlineData.data);
+                          for (const chunk of mulawChunks) {
+                            if (ws.readyState === WebSocket.OPEN) {
+                              ws.send(JSON.stringify({ event: 'media', streamSid, media: { payload: chunk } }));
+                            }
+                          }
                         }
                       }
                     }
-                  }
-                  
-                  // Handle user transcriptions
-                  const userTurn = (msg.serverContent as any)?.userTurn;
-                  if (userTurn?.parts) {
-                    for (const part of userTurn.parts) {
-                      if (part.text) {
-                        transcript.push({ role: 'User', text: part.text });
+                    
+                    // Handle user transcriptions
+                    const userTurn = (msg.serverContent as any)?.userTurn;
+                    if (userTurn?.parts) {
+                      for (const part of userTurn.parts) {
+                        if (part.text) {
+                          transcript.push({ role: 'User', text: part.text });
+                        }
                       }
                     }
-                  }
-    
-                  // Handle tool calls
-                  if (msg.toolCall?.functionCalls) {
-                    const responses = await Promise.all(msg.toolCall.functionCalls.map(async (call) => {
-                      let result;
-                      const args = call.args as any;
-                      if (call.name === 'lookupCatalog') result = await lookupCatalog(args.query);
-                      else if (call.name === 'sendFollowUp') result = await sendFollowUp(args.contactType, args.contactAddress, args.message);
-                      else if (call.name === 'makePhoneCall') result = await sendFollowUp('phone', args.phoneNumber, args.message);
-                      else if (call.name === 'checkServiceStatus') result = await checkServiceStatus();
-                      else if (call.name === 'bookAppointment') result = await bookAppointment(args.summary, args.description, args.startTime, args.endTime);
-                      return { id: call.id, name: call.name, response: result };
-                    }));
-                    geminiSession.sendToolResponse({ functionResponses: responses });
+      
+                    // Handle tool calls
+                    if (msg.toolCall?.functionCalls) {
+                      const responses = await Promise.all(msg.toolCall.functionCalls.map(async (call) => {
+                        let result;
+                        const args = call.args as any;
+                        if (call.name === 'lookupCatalog') result = await lookupCatalog(args.query);
+                        else if (call.name === 'sendFollowUp') result = await sendFollowUp(args.contactType, args.contactAddress, args.message);
+                        else if (call.name === 'makePhoneCall') result = await sendFollowUp('phone', args.phoneNumber, args.message);
+                        else if (call.name === 'checkServiceStatus') result = await checkServiceStatus();
+                        else if (call.name === 'bookAppointment') result = await bookAppointment(args.summary, args.description, args.startTime, args.endTime);
+                        return { id: call.id, name: call.name, response: result };
+                      }));
+                      geminiSession.sendToolResponse({ functionResponses: responses });
+                    }
+                  } catch (e) {
+                    console.error('[Twilio] Error processing Gemini message:', e);
                   }
                 },
                 onerror: (err) => {
                   console.error('[Twilio] Gemini session error:', err);
-                  ws.close();
+                  if (ws.readyState === WebSocket.OPEN) ws.close();
                 },
                 onclose: () => {
                   console.log('[Twilio] Gemini session closed');
-                  ws.close();
+                  if (ws.readyState === WebSocket.OPEN) ws.close();
                 }
               }
             });
-          } catch (err) {
+          } catch (err: any) {
             console.error('[Twilio] Failed to connect to Gemini:', err);
-            ws.close();
+            console.error('[Twilio] Gemini Error Details:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
+            if (ws.readyState === WebSocket.OPEN) ws.close();
           }
   
         } else if (data.event === 'media' && geminiSession) {
           const pcm16 = mulawToPcm16(data.media.payload);
-          if (pcm16) geminiSession.sendRealtimeInput({ media: { data: pcm16, mimeType: 'audio/pcm;rate=16000' } });
+          if (pcm16) {
+            try {
+              geminiSession.sendRealtimeInput({ media: { data: pcm16, mimeType: 'audio/pcm;rate=16000' } });
+            } catch (e) {
+              console.error('[Twilio] Error sending media to Gemini:', e);
+            }
+          }
         } else if (data.event === 'stop') {
           console.log(`[Twilio] Stream stopped: ${streamSid}`);
-          ws.close();
+          if (ws.readyState === WebSocket.OPEN) ws.close();
         }
       } catch (err) {
         console.error('[Twilio] Error processing message:', err);
-        ws.close();
+        if (ws.readyState === WebSocket.OPEN) ws.close();
       }
     });
 
     ws.on('close', async () => {
       console.log(`[Twilio] Connection closed: ${streamSid}`);
-      if (geminiSession) geminiSession.close();
+      if (geminiSession) {
+        try {
+          geminiSession.close();
+        } catch (e) {}
+      }
 
       // Log session to Firestore
       if (transcript.length > 0 && firestore) {
@@ -1131,6 +1161,10 @@ async function startServer() {
         ws.send(JSON.stringify({ event: 'started' }));
       }
     });
+  });
+
+  httpServer.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on http://localhost:${PORT}`);
   });
 } catch (err) {
     console.error('[Server] Error in startServer:', err);
